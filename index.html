@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProbTrainer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23ffa116'/><circle cx='10' cy='10' r='3' fill='%231a1a1a'/><circle cx='22' cy='22' r='3' fill='%231a1a1a'/><circle cx='16' cy='16' r='3' fill='%231a1a1a'/></svg>" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/"><span class="logo">P</span>ProbTrainer</a>
+    <nav class="topnav">
+      <a href="#/" data-nav="list">Problems</a>
+      <a href="#/stats" data-nav="stats">Progress</a>
+    </nav>
+    <div class="topbar-right">
+      <button class="btn ghost" id="randomBtn" title="Open a random unsolved problem (R)">Pick One</button>
+      <button class="btn ghost icon" id="themeBtn" title="Toggle theme">◐</button>
+    </div>
+  </header>
+  <main id="app"></main>
+
+  <script src="js/expr.js"></script>
+  <script src="js/problems-1.js"></script>
+  <script src="js/problems-2.js"></script>
+  <script src="js/problems-3.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
