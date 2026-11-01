@@ -4,8 +4,12 @@ A LeetCode-style practice site for probability interview problems.
 
 ## Features
 
-- 201 problems: Easy, Medium, and Hard, over 30 topics (dice, cards, Bayes, Markov chains,
-  martingales, geometric probability, order statistics, Brownian motion, and more).
+- 456 problems: Easy, Medium, and Hard, over 40 topics (dice, cards, Bayes, Markov chains,
+  martingales, geometric probability, order statistics, inference, and more).
+- A 6.3700 (MIT Introduction to Probability, Fall 2026) course view. Problems are grouped by lecture
+  (Lectures 1-12 follow the Fall 2026 slides), with textbook sections (Bertsekas & Tsitsiklis)
+  and per-lecture progress. 41 interview-style problems outside the syllabus are listed as extras.
+- Timed practice exams (Quiz 1, Quiz 2, Final) drawn at random across the lectures in scope.
 - Problem list with search, difficulty / status / topic filters, sorting, and stars.
 - Problem page with a statement, hints, a solution, and notes.
 - Answer checking: enter a number or an exact expression (`3/8`, `1-(5/6)^4`, `sqrt(2)/2`,
@@ -35,7 +39,9 @@ Then go to http://localhost:8123.
 ## Add problems
 
 Problems live in `js/problems-*.js`. Each entry has an `id`, `title`, `diff`, `topics`,
-`answer` (an expression), `statement`, `hints`, and `solution`. Math uses `$...$` and
+`answer` (an expression), `statement`, `hints`, and `solution`. Optional fields: `lec` (the
+6.3700 lecture number) and `tol` (relative tolerance, for answers read from normal tables).
+`js/course.js` holds the course structure and the lecture map for problems without `lec`. Math uses `$...$` and
 `$$...$$` (KaTeX). After an edit, run:
 
 ```bash

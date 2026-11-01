@@ -14,7 +14,7 @@
 
   const store = Object.assign({ problems: {}, theme: "dark" }, safeGet(STORE_KEY) || {});
   const ui = Object.assign(
-    { q: "", diff: "", status: "", topics: [], sort: "id", dir: 1, starredOnly: false },
+    { q: "", diff: "", status: "", topics: [], sort: "id", dir: 1, starredOnly: false, lec: "" },
     safeGet(UI_KEY) || {}
   );
   const save = () => safeSet(STORE_KEY, store);
@@ -74,6 +74,13 @@
     return p._value;
   };
 
+  const tolText = (p) => `${+((p.tol || 5e-4) * 100).toPrecision(3)}%`;
+
+  const lecLabel = (n) => {
+    const l = COURSE.lecture(n);
+    return l ? `L${n}. ${l.title}` : "";
+  };
+
   function formatNumber(v) {
     if (Number.isInteger(v)) return String(v);
     const a = Math.abs(v);
@@ -117,10 +124,19 @@
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   })();
 
+  // Lecture filter values: "5" (one lecture), "extra" (no lecture), or an exam id ("quiz2").
+  function inLecFilter(p, v) {
+    if (v === "extra") return !p.lec;
+    const exam = COURSE.exams[v];
+    if (exam) return p.lec >= exam.from && p.lec <= exam.to;
+    return p.lec === +v;
+  }
+
   function filtered() {
     const q = ui.q.trim().toLowerCase();
     let list = PROBLEMS.filter((p) => {
       if (ui.diff && p.diff !== ui.diff) return false;
+      if (ui.lec && !inLecFilter(p, ui.lec)) return false;
       if (ui.status && statusOf(p.id) !== ui.status) return false;
       if (ui.starredOnly && !(peek(p.id) && peek(p.id).starred)) return false;
       if (ui.topics.length && !ui.topics.every((t) => p.topics.includes(t))) return false;
@@ -213,6 +229,14 @@
               <option value="attempted">Attempted</option><option value="solved">Solved</option>
             </select>
             <select id="fStar"><option value="">All problems</option><option value="1">Starred</option></select>
+            <select id="fLec" title="6.3700 lecture">
+              <option value="">All lectures</option>
+              <optgroup label="Exam scope">${Object.entries(COURSE.exams).map(([id, e]) =>
+                `<option value="${id}">${esc(e.name)} (L${e.from}-L${e.to})</option>`).join("")}</optgroup>
+              ${COURSE.units.map((u) => `<optgroup label="${esc(u.name)}">${u.lectures.map((l) =>
+                `<option value="${l.n}">L${l.n}. ${esc(l.title)}</option>`).join("")}</optgroup>`).join("")}
+              <option value="extra">Beyond 6.3700 (interview extras)</option>
+            </select>
             <input id="fQ" type="search" placeholder="Search questions   ( / )" />
             <button class="btn ghost" id="fClear">Clear</button>
             <span class="count" id="fCount"></span>
@@ -235,6 +259,8 @@
     $("#fStatus").value = ui.status;
     $("#fStar").value = ui.starredOnly ? "1" : "";
     $("#fQ").value = ui.q;
+    $("#fLec").value = ui.lec || "";
+    $("#fLec").onchange = (e) => { ui.lec = e.target.value; refresh(); };
 
     const refresh = () => { saveUi(); drawTopics(); drawRows(); };
     $("#fDiff").onchange = (e) => { ui.diff = e.target.value; refresh(); };
@@ -242,7 +268,7 @@
     $("#fStar").onchange = (e) => { ui.starredOnly = !!e.target.value; refresh(); };
     $("#fQ").oninput = (e) => { ui.q = e.target.value; refresh(); };
     $("#fClear").onclick = () => {
-      Object.assign(ui, { q: "", diff: "", status: "", topics: [], starredOnly: false });
+      Object.assign(ui, { q: "", diff: "", status: "", topics: [], starredOnly: false, lec: "" });
       renderList(); saveUi();
     };
     app.querySelectorAll("th[data-sort]").forEach((th) => {
@@ -389,7 +415,7 @@
             <div id="verdict"></div>
             <div class="syntax-help">Accepted: <code>+ - * / ^ !</code> <code>( )</code> <code>pi</code> <code>e</code>
               <code>sqrt()</code> <code>ln()</code> <code>exp()</code> <code>C(n,k)</code> <code>50%</code>.
-              Answers within 0.05% relative error are accepted.</div>
+              Answers within ${tolText(p)} relative error are accepted.</div>
           </div>
           <div class="subs" id="subs"></div>
         </section>
@@ -405,6 +431,8 @@
           <h1>${p.id}. ${esc(p.title)}</h1>
           <div class="pmeta">
             <span class="pill diff-${p.diff}">${p.diff}</span>
+            ${p.lec ? `<a class="pill lec-pill" href="#/course/${p.lec}" title="6.3700 lecture">${COURSE.code} · ${esc(lecLabel(p.lec))}</a>`
+              : `<span class="pill" title="Outside the 6.3700 syllabus">Interview extra</span>`}
             ${statusOf(id) === "solved" ? `<span class="pill solved-pill">Solved ✓</span>` : ""}
             ${r.viewedSolution ? `<span class="pill" title="You opened the solution">Solution viewed</span>` : ""}
           </div>
@@ -413,7 +441,7 @@
         body.querySelector(".topic-links").onclick = (e) => {
           const t = e.target.dataset.topic;
           if (!t) return;
-          Object.assign(ui, { topics: [t], q: "", diff: "", status: "", starredOnly: false });
+          Object.assign(ui, { topics: [t], q: "", diff: "", status: "", starredOnly: false, lec: "" });
           saveUi(); location.hash = "#/";
         };
       } else if (name === "hints") {
@@ -492,7 +520,7 @@
       if (!s) return;
       let v;
       try { v = Expr.evaluate(s); } catch (err) { prevEl.textContent = err.message; prevEl.classList.add("err"); return; }
-      const result = Expr.compare(v, answerValue(p));
+      const result = Expr.compare(v, answerValue(p), p.tol);
       r.submissions.unshift({ t: Date.now(), input: s, value: v, result });
       if (result === "correct") {
         if (r.status !== "solved") r.solvedAt = Date.now();
@@ -501,7 +529,7 @@
       save();
       const msg = {
         correct: [`Accepted`, `Correct. Exact answer: ${p.answer}`],
-        close: [`Close`, `Within 1% but not within 0.05%. Enter more digits or an exact expression.`],
+        close: [`Close`, `Near the answer but outside the ${tolText(p)} tolerance. Enter more digits or an exact expression.`],
         wrong: [`Wrong Answer`, `Your value: ${formatNumber(v)}`],
       }[result];
       $("#verdict").innerHTML = `<div class="verdict ${result}">${msg[0]}<span class="sub">${esc(msg[1])}</span></div>`;
@@ -547,6 +575,205 @@
     };
 
     if (tab === "description" && window.innerWidth > 900) inp.focus();
+  }
+
+  // ---------------------------------------------------------------- course view
+  const lecProblems = (n) => PROBLEMS.filter((p) => (n === "extra" ? !p.lec : p.lec === n));
+  const solvedCount = (list) => list.filter((p) => statusOf(p.id) === "solved").length;
+
+  function progressBar(done, total, color = "var(--accent)") {
+    return `<div class="bar"><div style="width:${total ? (100 * done) / total : 0}%;background:${color}"></div></div>`;
+  }
+
+  function problemRows(list) {
+    return list.map((p) => `<a class="mini-row" href="#/problem/${p.id}">
+        <span class="col-status">${ICONS[statusOf(p.id)]}</span>
+        <span class="mini-title">${p.id}. ${esc(p.title)}</span>
+        <span class="diff-${p.diff}">${p.diff}</span></a>`).join("");
+  }
+
+  function renderCourse(openLec) {
+    ui.openLecs = ui.openLecs || [];
+    if (openLec && !ui.openLecs.includes(openLec)) ui.openLecs.push(openLec);
+    const inSyllabus = PROBLEMS.filter((p) => p.lec);
+    const lecRow = (key, label, reading, list) => {
+      const open = ui.openLecs.includes(key);
+      const done = solvedCount(list);
+      return `<div class="lec ${open ? "open" : ""}" id="lec-${key}">
+        <button class="lec-head" data-lec="${key}">
+          <span class="lec-caret">${open ? "▾" : "▸"}</span>
+          <span class="lec-title">${label}</span>
+          ${reading ? `<span class="lec-reading" title="Bertsekas &amp; Tsitsiklis, 2nd ed.">B&amp;T ${reading}</span>` : ""}
+          <span class="lec-count">${done}/${list.length}</span>
+          <span class="lec-bar">${progressBar(done, list.length, done === list.length && list.length ? "var(--ok)" : "var(--accent)")}</span>
+        </button>
+        ${open ? `<div class="lec-body">${problemRows(list) || `<p class="muted">No problems yet.</p>`}
+          <div class="lec-actions"><a class="btn ghost" href="#/" data-filter-lec="${key}">Open in problem list</a></div></div>` : ""}
+      </div>`;
+    };
+
+    const units = COURSE.units.map((u) => {
+      const list = u.lectures.flatMap((l) => lecProblems(l.n));
+      const done = solvedCount(list);
+      return `<section class="card unit">
+        <div class="unit-head"><h3>${esc(u.name)}</h3><span class="muted">${done}/${list.length} solved</span></div>
+        ${u.lectures.map((l) => lecRow(l.n, `L${l.n}. ${esc(l.title)}`, l.reading, lecProblems(l.n))).join("")}
+        ${u.exam ? `<div class="unit-exam"><a class="btn accent" href="#/exam/${u.exam.id}">Practice ${esc(u.exam.name)}</a>
+          <span class="muted">${examScope(u.exam.id)}</span></div>` : ""}
+      </section>`;
+    }).join("");
+
+    const extras = lecProblems("extra");
+    const done = solvedCount(inSyllabus);
+    $("#app").innerHTML = `
+      <div class="course">
+        <section class="card course-hero">
+          <div>
+            <div class="muted">MIT ${COURSE.code} · ${esc(COURSE.term)}</div>
+            <h2>${esc(COURSE.name)}</h2>
+            <p class="muted">Problems sorted by lecture. Lectures 1-12 follow the ${esc(COURSE.term)} slides.
+              Later lectures follow the order of the <a class="link" href="${COURSE.source}" target="_blank" rel="noopener">MIT OpenCourseWare version</a>
+              and may not match this term. Readings refer to Bertsekas &amp; Tsitsiklis, <i>Introduction to Probability</i>, 2nd ed.</p>
+          </div>
+          <div class="hero-stats">
+            <div class="kpi"><div class="v">${done}<span class="muted"> / ${inSyllabus.length}</span></div><div class="l">Syllabus problems solved</div></div>
+            ${progressBar(done, inSyllabus.length)}
+            <div class="row-btns">
+              ${Object.entries(COURSE.exams).map(([id, e]) => `<a class="btn ghost" href="#/exam/${id}">${esc(e.name)}</a>`).join("")}
+            </div>
+          </div>
+        </section>
+        ${units}
+        <section class="card unit">
+          <div class="unit-head"><h3>Beyond ${COURSE.code}: interview extras</h3><span class="muted">${solvedCount(extras)}/${extras.length} solved</span></div>
+          <p class="muted">Martingales, Brownian motion, branching processes, Polya urns, and hard geometric problems. These are common in quant interviews but are not on the syllabus.</p>
+          ${lecRow("extra", "All extras", "", extras)}
+        </section>
+      </div>`;
+
+    const app = $("#app");
+    app.onclick = (e) => {
+      const head = e.target.closest(".lec-head");
+      if (head) {
+        const key = head.dataset.lec === "extra" ? "extra" : +head.dataset.lec;
+        ui.openLecs = ui.openLecs.includes(key) ? ui.openLecs.filter((k) => k !== key) : [...ui.openLecs, key];
+        saveUi();
+        const y = scrollY;
+        renderCourse();
+        scrollTo(0, y);
+        return;
+      }
+      const f = e.target.closest("[data-filter-lec]");
+      if (f) {
+        e.preventDefault();
+        Object.assign(ui, { topics: [], q: "", diff: "", status: "", starredOnly: false, lec: f.dataset.filterLec });
+        saveUi();
+        location.hash = "#/";
+      }
+    };
+    saveUi();
+    if (openLec) {
+      const el = document.getElementById(`lec-${openLec}`);
+      if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
+    }
+  }
+
+  // ---------------------------------------------------------------- practice exams
+  function examScope(id) {
+    const e = COURSE.exams[id];
+    return `${e.count} problems from L${e.from}-L${e.to}, ${e.minutes} min`;
+  }
+
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Spread the draw across lectures: shuffle each lecture's pool, then take one per lecture in turn.
+  function drawExam(id) {
+    const e = COURSE.exams[id];
+    const pools = [];
+    for (let n = e.from; n <= e.to; n++) {
+      const pool = shuffle(lecProblems(n));
+      if (pool.length) pools.push(pool);
+    }
+    shuffle(pools);
+    const ids = [];
+    while (ids.length < e.count && pools.some((p) => p.length)) {
+      for (const pool of pools) {
+        if (ids.length >= e.count) break;
+        if (pool.length) ids.push(pool.pop().id);
+      }
+    }
+    ids.sort((a, b) => (BY_ID.get(a).lec - BY_ID.get(b).lec) || a - b);
+    store.exams = store.exams || {};
+    store.exams[id] = { ids, startedAt: Date.now() };
+    save();
+    return store.exams[id];
+  }
+
+  function examStatus(pid, since) {
+    const subs = (peek(pid) && peek(pid).submissions) || [];
+    const recent = subs.filter((s) => s.t >= since);
+    if (recent.some((s) => s.result === "correct")) return "solved";
+    if (recent.length) return "attempted";
+    return "todo";
+  }
+
+  function renderExam(id) {
+    const e = COURSE.exams[id];
+    if (!e) { location.hash = "#/course"; return; }
+    store.exams = store.exams || {};
+    const ex = store.exams[id] || drawExam(id);
+    const results = ex.ids.map((pid) => examStatus(pid, ex.startedAt));
+    const score = results.filter((r) => r === "solved").length;
+    const end = ex.startedAt + e.minutes * 60000;
+
+    $("#app").innerHTML = `
+      <div class="course">
+        <section class="card course-hero">
+          <div>
+            <div class="muted"><a class="link" href="#/course">${COURSE.code}</a> · Practice exam</div>
+            <h2>${esc(e.name)}</h2>
+            <p class="muted">${examScope(id)}. A problem counts when you submit a correct answer after the exam starts.
+              Earlier solves do not count. Hints and solutions stay available, so hold yourself to exam rules.</p>
+          </div>
+          <div class="hero-stats">
+            <div class="kpi"><div class="v">${score}<span class="muted"> / ${ex.ids.length}</span></div><div class="l">Correct in this attempt</div></div>
+            <div class="kpi"><div class="v exam-clock" id="examClock">--:--</div><div class="l" id="examClockLbl">Time left</div></div>
+            <div class="row-btns"><button class="btn ghost" id="newExam">New exam</button></div>
+          </div>
+        </section>
+        <section class="card">
+          ${ex.ids.map((pid, i) => {
+            const p = BY_ID.get(pid);
+            return `<a class="mini-row" href="#/problem/${pid}">
+              <span class="col-status">${ICONS[results[i]]}</span>
+              <span class="mini-title">Q${i + 1}. ${esc(p.title)} <span class="muted">· ${esc(lecLabel(p.lec))}</span></span>
+              <span class="diff-${p.diff}">${p.diff}</span></a>`;
+          }).join("")}
+        </section>
+      </div>`;
+
+    $("#newExam").onclick = () => {
+      if (confirm("Start a new exam? The current draw and timer are replaced.")) { drawExam(id); renderExam(id); }
+    };
+
+    const tick = () => {
+      const el = $("#examClock");
+      if (!el) { clearInterval(timerHandle); return; }
+      const left = Math.round((end - Date.now()) / 1000);
+      const s = Math.abs(left);
+      el.textContent = `${left < 0 ? "+" : ""}${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      el.classList.toggle("over", left < 0);
+      $("#examClockLbl").textContent = left < 0 ? "Over time" : "Time left";
+    };
+    clearInterval(timerHandle);
+    tick();
+    timerHandle = setInterval(tick, 1000);
   }
 
   // ---------------------------------------------------------------- stats view
@@ -599,7 +826,7 @@
       const t = e.target.dataset.topic;
       if (!t) return;
       e.preventDefault();
-      Object.assign(ui, { topics: [t], q: "", diff: "", status: "", starredOnly: false });
+      Object.assign(ui, { topics: [t], q: "", diff: "", status: "", starredOnly: false, lec: "" });
       saveUi(); location.hash = "#/";
     };
   }
@@ -613,6 +840,15 @@
     if (parts[0] === "problem" && parts[1]) {
       renderProblem(+parts[1], parts[2]);
       document.title = `${parts[1]}. ${(BY_ID.get(+parts[1]) || {}).title || ""} - ProbTrainer`;
+    } else if (parts[0] === "course") {
+      $('[data-nav="course"]').classList.add("active");
+      renderCourse(parts[1] === "extra" ? "extra" : +parts[1] || null);
+      document.title = `${COURSE.code} - ProbTrainer`;
+      if (parts[1]) return;
+    } else if (parts[0] === "exam" && parts[1]) {
+      $('[data-nav="course"]').classList.add("active");
+      renderExam(parts[1]);
+      document.title = `${(COURSE.exams[parts[1]] || {}).name || "Exam"} - ProbTrainer`;
     } else if (parts[0] === "stats") {
       $('[data-nav="stats"]').classList.add("active");
       renderStats();

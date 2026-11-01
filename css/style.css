@@ -243,3 +243,37 @@ textarea.notes:focus { border-color: var(--accent); }
 }
 .stats-grid.two-col { grid-template-columns: 1fr 1fr; }
 @media (max-width: 760px) { .stats-grid.two-col { grid-template-columns: 1fr; } }
+
+/* course + exam pages */
+.course { max-width: 1000px; margin: 0 auto; padding: 24px 20px 60px; }
+.course h2 { margin: 2px 0 8px; font-size: 22px; }
+.course-hero { display: grid; grid-template-columns: 1fr 260px; gap: 24px; align-items: start; }
+@media (max-width: 760px) { .course-hero { grid-template-columns: 1fr; } }
+.hero-stats { display: flex; flex-direction: column; gap: 10px; }
+.link { color: var(--accent); }
+.link:hover { text-decoration: underline; }
+.unit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.unit-head h3 { margin: 0; }
+.lec { border-top: 1px solid var(--border); }
+.lec-head {
+  width: 100%; display: grid; grid-template-columns: 16px 1fr auto 52px 120px; gap: 12px; align-items: center;
+  background: none; border: 0; padding: 10px 4px; cursor: pointer; text-align: left;
+}
+.lec-head:hover { background: var(--panel-2); }
+.lec-caret { color: var(--text-3); }
+.lec-reading { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.lec-count { color: var(--text-2); font-size: 12px; text-align: right; }
+@media (max-width: 600px) {
+  .lec-head { grid-template-columns: 16px 1fr 44px; }
+  .lec-reading, .lec-bar { display: none; }
+}
+.lec-body { padding: 0 4px 12px 28px; }
+.lec-actions { margin-top: 8px; }
+.mini-row { display: grid; grid-template-columns: 32px 1fr 70px; gap: 8px; align-items: center; padding: 7px 6px; border-radius: 6px; }
+.mini-row:hover { background: var(--panel-2); }
+.mini-row:hover .mini-title { color: var(--accent); }
+.unit-exam { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 12px; }
+.exam-clock { font-family: ui-monospace, Consolas, monospace; }
+.exam-clock.over { color: var(--bad); }
+.lec-pill:hover { color: var(--accent); }
+.filters select#fLec { max-width: 220px; }

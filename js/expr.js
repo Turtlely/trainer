@@ -139,12 +139,12 @@
     return v;
   }
 
-  // Returns "correct", "close" (within 1%), or "wrong".
-  function compare(got, want) {
+  // Returns "correct" (within `tol`, default 0.05%), "close" (within max(1%, 3*tol)), or "wrong".
+  function compare(got, want, tol = 5e-4) {
     const err = Math.abs(got - want);
     const scale = Math.max(Math.abs(want), 1e-12);
-    if (err <= 5e-4 * scale + 1e-12) return "correct";
-    if (err <= 1e-2 * scale) return "close";
+    if (err <= tol * scale + 1e-12) return "correct";
+    if (err <= Math.max(1e-2, 3 * tol) * scale) return "close";
     return "wrong";
   }
 
