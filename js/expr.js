@@ -1,5 +1,5 @@
 // Small, safe math-expression evaluator for answer checking.
-// Supports: numbers, + - * / ^, parentheses, implicit multiplication,
+// Supports: numbers (also 0x hex and 0b binary), + - * / ^, parentheses, implicit multiplication,
 // percent, factorial (!), constants (pi, e), and functions
 // sqrt, cbrt, ln, log, log10, log2, exp, abs, sin, cos, tan, C/choose/binom.
 (function (root) {
@@ -37,6 +37,16 @@
     while (i < s.length) {
       const c = s[i];
       if (/\s/.test(c)) { i++; continue; }
+      // Hex and binary integer literals (0x1F, 0b1010), with optional "_" separators.
+      const radix = /^0([xXbB])([0-9A-Fa-f_]+)/.exec(s.slice(i));
+      if (radix) {
+        const digits = radix[2].replace(/_/g, "");
+        const base = /[xX]/.test(radix[1]) ? 16 : 2;
+        if (!digits || (base === 2 && /[^01]/.test(digits))) throw new Error(`Bad literal "${radix[0]}"`);
+        toks.push({ t: "num", v: parseInt(digits, base) });
+        i += radix[0].length;
+        continue;
+      }
       const num = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(s.slice(i));
       if (num) {
         // Avoid eating the constant "e" as an exponent marker ("2e" = 2*e).
@@ -140,8 +150,10 @@
   }
 
   // Returns "correct" (within `tol`, default 0.05%), "close" (within max(1%, 3*tol)), or "wrong".
+  // tol = 0 means an exact match (used for integer, hex, and binary answers).
   function compare(got, want, tol = 5e-4) {
     const err = Math.abs(got - want);
+    if (tol === 0) return err < 1e-9 ? "correct" : "wrong";
     const scale = Math.max(Math.abs(want), 1e-12);
     if (err <= tol * scale + 1e-12) return "correct";
     if (err <= Math.max(1e-2, 3 * tol) * scale) return "close";

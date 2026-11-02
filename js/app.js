@@ -1,8 +1,8 @@
 (function () {
   "use strict";
 
-  const PROBLEMS = window.PROBLEMS.slice().sort((a, b) => a.id - b.id);
-  const BY_ID = new Map(PROBLEMS.map((p) => [p.id, p]));
+  const ALL_PROBLEMS = window.PROBLEMS.slice().sort((a, b) => a.id - b.id);
+  const ALL_BY_ID = new Map(ALL_PROBLEMS.map((p) => [p.id, p]));
   const DIFFS = ["Easy", "Medium", "Hard"];
   const DIFF_COLOR = { Easy: "var(--easy)", Medium: "var(--medium)", Hard: "var(--hard)" };
   const STORE_KEY = "probtrainer.v1";
@@ -20,6 +20,24 @@
   const save = () => safeSet(STORE_KEY, store);
   const saveUi = () => safeSet(UI_KEY, ui);
 
+  // The active course decides which problems, lectures, and exams every view shows.
+  // A link to a problem of another course switches to that course.
+  const linked = location.hash.match(/^#\/problem\/(\d+)/);
+  if (linked && ALL_BY_ID.has(+linked[1])) ui.course = courseOf(ALL_BY_ID.get(+linked[1]));
+  if (!COURSES[ui.course]) ui.course = DEFAULT_COURSE;
+  const COURSE = COURSES[ui.course];
+  const PROBLEMS = ALL_PROBLEMS.filter((p) => courseOf(p) === COURSE.code);
+  const BY_ID = new Map(PROBLEMS.map((p) => [p.id, p]));
+  saveUi();
+
+  function switchCourse(code, hash = "#/") {
+    if (code === ui.course) return;
+    Object.assign(ui, { course: code, lec: "", topics: [], q: "" });
+    saveUi();
+    location.hash = hash;
+    location.reload();
+  }
+
   function rec(id) {
     if (!store.problems[id]) store.problems[id] = { submissions: [] };
     return store.problems[id];
@@ -30,7 +48,14 @@
   // ---------------------------------------------------------------- helpers
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const paras = (text) => text.trim().split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join("");
+  // Paragraphs split on blank lines. A paragraph that starts with ~~~ is a code block, and
+  // [[text]] inside a paragraph is inline code. (Problem text lives in template literals,
+  // so backtick markers are not usable.) KaTeX skips both.
+  // The lookahead lets code end in "]", as in [[Mem[0x324]]].
+  const inlineCode = (s) => esc(s).replace(/\[\[(.+?)\]\](?!\])/g, "<code>$1</code>");
+  const paras = (text) => text.trim().split(/\n\s*\n/).map((p) => p.startsWith("~~~")
+    ? `<pre class="code">${esc(p.replace(/^~~~[^\n]*\n?/, "").replace(/\n?~~~\s*$/, ""))}</pre>`
+    : `<p>${inlineCode(p)}</p>`).join("");
 
   function typeset(el) {
     if (window.renderMathInElement) {
@@ -74,7 +99,7 @@
     return p._value;
   };
 
-  const tolText = (p) => `${+((p.tol || 5e-4) * 100).toPrecision(3)}%`;
+  const tolText = (p) => (p.tol === 0 ? "exact" : `${+((p.tol || 5e-4) * 100).toPrecision(3)}%`);
 
   const lecLabel = (n) => {
     const l = COURSE.lecture(n);
@@ -112,6 +137,13 @@
     save();
   });
   applyTheme();
+
+  const courseSel = $("#courseSel");
+  courseSel.innerHTML = Object.values(COURSES).map((c) =>
+    `<option value="${esc(c.code)}">${esc(c.code)} ${esc(c.name)}</option>`).join("");
+  courseSel.value = COURSE.code;
+  courseSel.onchange = () => switchCourse(courseSel.value);
+  $('[data-nav="course"]').textContent = COURSE.code;
 
   $("#randomBtn").addEventListener("click", () => {
     location.hash = `#/problem/${randomProblem(filtered()).id}`;
@@ -229,13 +261,13 @@
               <option value="attempted">Attempted</option><option value="solved">Solved</option>
             </select>
             <select id="fStar"><option value="">All problems</option><option value="1">Starred</option></select>
-            <select id="fLec" title="6.3700 lecture">
+            <select id="fLec" title="${esc(COURSE.code)} lecture">
               <option value="">All lectures</option>
               <optgroup label="Exam scope">${Object.entries(COURSE.exams).map(([id, e]) =>
                 `<option value="${id}">${esc(e.name)} (L${e.from}-L${e.to})</option>`).join("")}</optgroup>
               ${COURSE.units.map((u) => `<optgroup label="${esc(u.name)}">${u.lectures.map((l) =>
                 `<option value="${l.n}">L${l.n}. ${esc(l.title)}</option>`).join("")}</optgroup>`).join("")}
-              <option value="extra">Beyond 6.3700 (interview extras)</option>
+              ${COURSE.extras ? `<option value="extra">${esc(COURSE.extras.option)}</option>` : ""}
             </select>
             <input id="fQ" type="search" placeholder="Search questions   ( / )" />
             <button class="btn ghost" id="fClear">Clear</button>
@@ -374,7 +406,11 @@
 
   function renderProblem(id, tab) {
     const p = BY_ID.get(id);
-    if (!p) { location.hash = "#/"; return; }
+    if (!p) {
+      if (ALL_BY_ID.has(id)) switchCourse(courseOf(ALL_BY_ID.get(id)), location.hash);
+      else location.hash = "#/";
+      return;
+    }
     const r = rec(id);
     tab = tab || "description";
     const idx = PROBLEMS.indexOf(p);
@@ -405,7 +441,7 @@
           <div class="tabs"><button class="tab on">Answer</button></div>
           <div class="answer-box">
             <label for="ans">Your answer: a number or exact expression</label>
-            <input id="ans" class="answer-input" autocomplete="off" spellcheck="false" placeholder="e.g. 3/8, 1-(5/6)^4, sqrt(2)/2, 1/e" />
+            <input id="ans" class="answer-input" autocomplete="off" spellcheck="false" placeholder="${esc(COURSE.answerPlaceholder)}" />
             <div class="preview" id="preview">&nbsp;</div>
             <div class="answer-actions">
               <button class="btn primary" id="submit">Submit</button>
@@ -414,8 +450,8 @@
             </div>
             <div id="verdict"></div>
             <div class="syntax-help">Accepted: <code>+ - * / ^ !</code> <code>( )</code> <code>pi</code> <code>e</code>
-              <code>sqrt()</code> <code>ln()</code> <code>exp()</code> <code>C(n,k)</code> <code>50%</code>.
-              Answers within ${tolText(p)} relative error are accepted.</div>
+              <code>sqrt()</code> <code>ln()</code> <code>exp()</code> <code>C(n,k)</code> <code>50%</code> <code>0x1F</code> <code>0b101</code>.
+              ${p.tol === 0 ? "This answer must match exactly." : `Answers within ${tolText(p)} relative error are accepted.`}</div>
           </div>
           <div class="subs" id="subs"></div>
         </section>
@@ -431,8 +467,8 @@
           <h1>${p.id}. ${esc(p.title)}</h1>
           <div class="pmeta">
             <span class="pill diff-${p.diff}">${p.diff}</span>
-            ${p.lec ? `<a class="pill lec-pill" href="#/course/${p.lec}" title="6.3700 lecture">${COURSE.code} · ${esc(lecLabel(p.lec))}</a>`
-              : `<span class="pill" title="Outside the 6.3700 syllabus">Interview extra</span>`}
+            ${p.lec ? `<a class="pill lec-pill" href="#/course/${p.lec}" title="${esc(COURSE.code)} lecture">${COURSE.code} · ${esc(lecLabel(p.lec))}</a>`
+              : `<span class="pill" title="Outside the ${esc(COURSE.code)} syllabus">Interview extra</span>`}
             ${statusOf(id) === "solved" ? `<span class="pill solved-pill">Solved ✓</span>` : ""}
             ${r.viewedSolution ? `<span class="pill" title="You opened the solution">Solution viewed</span>` : ""}
           </div>
@@ -603,7 +639,7 @@
         <button class="lec-head" data-lec="${key}">
           <span class="lec-caret">${open ? "▾" : "▸"}</span>
           <span class="lec-title">${label}</span>
-          ${reading ? `<span class="lec-reading" title="Bertsekas &amp; Tsitsiklis, 2nd ed.">B&amp;T ${reading}</span>` : ""}
+          ${reading && COURSE.reading ? `<span class="lec-reading" title="${esc(COURSE.reading.title)}">${esc(COURSE.reading.prefix)} ${reading}</span>` : ""}
           <span class="lec-count">${done}/${list.length}</span>
           <span class="lec-bar">${progressBar(done, list.length, done === list.length && list.length ? "var(--ok)" : "var(--accent)")}</span>
         </button>
@@ -631,9 +667,7 @@
           <div>
             <div class="muted">MIT ${COURSE.code} · ${esc(COURSE.term)}</div>
             <h2>${esc(COURSE.name)}</h2>
-            <p class="muted">Problems sorted by lecture. Lectures 1-12 follow the ${esc(COURSE.term)} slides.
-              Later lectures follow the order of the <a class="link" href="${COURSE.source}" target="_blank" rel="noopener">MIT OpenCourseWare version</a>
-              and may not match this term. Readings refer to Bertsekas &amp; Tsitsiklis, <i>Introduction to Probability</i>, 2nd ed.</p>
+            <p class="muted">${COURSE.blurb}</p>
           </div>
           <div class="hero-stats">
             <div class="kpi"><div class="v">${done}<span class="muted"> / ${inSyllabus.length}</span></div><div class="l">Syllabus problems solved</div></div>
@@ -644,11 +678,11 @@
           </div>
         </section>
         ${units}
-        <section class="card unit">
-          <div class="unit-head"><h3>Beyond ${COURSE.code}: interview extras</h3><span class="muted">${solvedCount(extras)}/${extras.length} solved</span></div>
-          <p class="muted">Martingales, Brownian motion, branching processes, Polya urns, and hard geometric problems. These are common in quant interviews but are not on the syllabus.</p>
+        ${COURSE.extras ? `<section class="card unit">
+          <div class="unit-head"><h3>${esc(COURSE.extras.title)}</h3><span class="muted">${solvedCount(extras)}/${extras.length} solved</span></div>
+          <p class="muted">${esc(COURSE.extras.blurb)}</p>
           ${lecRow("extra", "All extras", "", extras)}
-        </section>
+        </section>` : ""}
       </div>`;
 
     const app = $("#app");
@@ -710,9 +744,17 @@
     }
     ids.sort((a, b) => (BY_ID.get(a).lec - BY_ID.get(b).lec) || a - b);
     store.exams = store.exams || {};
-    store.exams[id] = { ids, startedAt: Date.now() };
+    store.exams[examKey(id)] = { ids, startedAt: Date.now() };
     save();
-    return store.exams[id];
+    return store.exams[examKey(id)];
+  }
+
+  // Exam ids repeat across courses ("quiz2"), so saved draws are keyed by course.
+  // 6.3700 keeps the bare id so that draws saved before multi-course support still load.
+  const examKey = (id) => (COURSE.code === DEFAULT_COURSE ? id : `${COURSE.code}:${id}`);
+  function savedExam(id) {
+    const ex = (store.exams || {})[examKey(id)];
+    return ex && ex.ids.every((pid) => BY_ID.has(pid)) ? ex : null;
   }
 
   function examStatus(pid, since) {
@@ -726,8 +768,7 @@
   function renderExam(id) {
     const e = COURSE.exams[id];
     if (!e) { location.hash = "#/course"; return; }
-    store.exams = store.exams || {};
-    const ex = store.exams[id] || drawExam(id);
+    const ex = savedExam(id) || drawExam(id);
     const results = ex.ids.map((pid) => examStatus(pid, ex.startedAt));
     const score = results.filter((r) => r === "solved").length;
     const end = ex.startedAt + e.minutes * 60000;

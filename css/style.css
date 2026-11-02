@@ -162,6 +162,13 @@ button { font: inherit; color: inherit; }
 .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--chip); }
 .pill.solved-pill { color: var(--ok); }
 .statement p, .solution p, .hint-body p { margin: 0 0 12px; }
+.statement pre.code, .solution pre.code, .hint-body pre.code {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; background: var(--chip); color: var(--text);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-x: auto; white-space: pre;
+}
+.statement p code, .solution p code, .hint-body p code {
+  background: var(--chip); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, Consolas, monospace; font-size: 0.92em;
+}
 .statement { font-size: 15px; }
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
 .topic-links { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; }
@@ -277,3 +284,11 @@ textarea.notes:focus { border-color: var(--accent); }
 .exam-clock.over { color: var(--bad); }
 .lec-pill:hover { color: var(--accent); }
 .filters select#fLec { max-width: 220px; }
+
+/* course switcher */
+.course-sel {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 8px; font-size: 13px; max-width: 220px; cursor: pointer;
+}
+.course-sel:focus { outline: none; border-color: var(--accent); }
+@media (max-width: 640px) { .course-sel { max-width: 110px; } }

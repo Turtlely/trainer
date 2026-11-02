@@ -5,11 +5,34 @@
 // Readings are sections of Bertsekas & Tsitsiklis, "Introduction to Probability", 2nd ed.
 // Load this file after all problem files.
 (function (root) {
+  // Registry of courses. A problem belongs to the course named by its `course` field;
+  // problems without one belong to 6.3700. course-*.js files call addCourse() too.
+  root.COURSES = root.COURSES || {};
+  root.DEFAULT_COURSE = "6.3700";
+  root.courseOf = (p) => p.course || root.DEFAULT_COURSE;
+  root.addCourse = (c) => {
+    c.lecture = (n) => {
+      for (const u of c.units) for (const l of u.lectures) if (l.n === n) return l;
+      return null;
+    };
+    root.COURSES[c.code] = c;
+  };
+
   const COURSE = {
     code: "6.3700",
     name: "Introduction to Probability",
     term: "Fall 2026",
     source: "https://ocw.mit.edu/courses/6-041sc-probabilistic-systems-analysis-and-applied-probability-fall-2013/",
+    blurb: `Problems sorted by lecture. Lectures 1-12 follow the Fall 2026 slides.
+      Later lectures follow the order of the <a class="link" href="https://ocw.mit.edu/courses/6-041sc-probabilistic-systems-analysis-and-applied-probability-fall-2013/" target="_blank" rel="noopener">MIT OpenCourseWare version</a>
+      and may not match this term. Readings refer to Bertsekas &amp; Tsitsiklis, <i>Introduction to Probability</i>, 2nd ed.`,
+    reading: { prefix: "B&T", title: "Bertsekas & Tsitsiklis, 2nd ed." },
+    answerPlaceholder: "e.g. 3/8, 1-(5/6)^4, sqrt(2)/2, 1/e",
+    extras: {
+      title: "Beyond 6.3700: interview extras",
+      option: "Beyond 6.3700 (interview extras)",
+      blurb: "Martingales, Brownian motion, branching processes, Polya urns, and hard geometric problems. These are common in quant interviews but are not on the syllabus.",
+    },
     units: [
       { name: "Quiz 1: Lectures 1-7", lectures: [
         { n: 1, title: "Probability Models and Axioms", reading: "§1.1-1.2" },
@@ -103,13 +126,10 @@
     }
   }
   for (const p of root.PROBLEMS || []) {
+    if (p.course) continue; // problems of other courses carry their own lecture numbers
     if (p.lec !== undefined && !FALL_NATIVE(p.id)) p.lec = toFall(p.lec, p.id);
   }
 
-  COURSE.lecture = (n) => {
-    for (const u of COURSE.units) for (const l of u.lectures) if (l.n === n) return l;
-    return null;
-  };
   COURSE.MAP = MAP;
-  root.COURSE = COURSE;
+  root.addCourse(COURSE);
 })(typeof window !== "undefined" ? window : globalThis);
