@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Figure Sheet</title>
+  <!-- Developer page: shows every figure from js/fig.js at full size. Serve the trainer folder
+       and open /scripts/figs.html. Add ?f=name to show only figures whose name contains "name". -->
+  <link rel="stylesheet" href="../css/style.css?v=dev">
+  <style>
+    body { padding: 16px; height: auto; overflow: auto; }
+    .item { margin: 0 0 28px; }
+    .item h4 { margin: 0 0 6px; font: 600 13px ui-monospace, Consolas, monospace; color: var(--text-3); }
+    .item .fig { margin: 0; max-width: none; }
+    button { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <button class="btn" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">Toggle theme</button>
+  <div id="list"></div>
+  <script src="../js/fig.js?v=dev"></script>
+  <script src="../js/real-6191-quiz.js?v=dev"></script>
+  <script src="../js/real-6191-ws.js?v=dev"></script>
+  <script>
+    const f = new URLSearchParams(location.search).get("f") || "";
+    document.getElementById("list").innerHTML = Object.entries(window.FIGS).filter(([k]) => k.includes(f))
+      .map(([k, v]) => `<div class="item"><h4>${k}</h4>${v}</div>`).join("");
+  </script>
+</body>
+</html>

@@ -43,6 +43,11 @@
     return store.problems[id];
   }
   const peek = (id) => store.problems[id] || null;
+  // The first solve records the active time spent until then (r.time, counted by the problem timer).
+  function markSolved(r) {
+    if (r.status !== "solved") { r.solvedAt = Date.now(); r.solveTime = r.time || 0; }
+    r.status = "solved";
+  }
   const statusOf = (id) => (peek(id) && peek(id).status) || "todo";
 
   // ---------------------------------------------------------------- helpers
@@ -52,10 +57,49 @@
   // [[text]] inside a paragraph is inline code. (Problem text lives in template literals,
   // so backtick markers are not usable.) KaTeX skips both.
   // The lookahead lets code end in "]", as in [[Mem[0x324]]].
-  const inlineCode = (s) => esc(s).replace(/\[\[(.+?)\]\](?!\])/g, "<code>$1</code>");
-  const paras = (text) => text.trim().split(/\n\s*\n/).map((p) => p.startsWith("~~~")
-    ? `<pre class="code">${esc(p.replace(/^~~~[^\n]*\n?/, "").replace(/\n?~~~\s*$/, ""))}</pre>`
-    : `<p>${inlineCode(p)}</p>`).join("");
+  // Other block forms (used by the official problems):
+  //   "@fig name"        a figure from js/fig.js (window.FIGS); one name per line
+  //   "| a | b |" lines  a table; a "|---|" second row makes the first row a header.
+  //                      A first line "{plain}" drops the bold first column.
+  //   "- item" lines     a bullet list
+  // and **text** is bold. Write \$ for a literal dollar sign.
+  const inlineCode = (s) => esc(s).replace(/\[\[(.+?)\]\](?!\])/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    // "\$" is a literal dollar sign: alone in its own text node, KaTeX does not pair it.
+    .replace(/\\\$/g, "<span>$$</span>");
+  function table(p) {
+    const lines = p.split("\n");
+    const plain = lines[0].trim() === "{plain}";
+    if (plain) lines.shift();
+    const rows = lines.map((l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim()));
+    const head = rows.length > 1 && rows[1].every((c) => /^:?-{3,}:?$/.test(c));
+    const cell = (tag, c) => (c ? `<${tag}>${inlineCode(c)}</${tag}>` : `<${tag} class="blank"></${tag}>`);
+    const body = (head ? rows.slice(2) : rows).map((r) => `<tr>${r.map((c) => cell("td", c)).join("")}</tr>`).join("");
+    return `<div class="tbl-wrap"><table class="tbl${plain ? " plain" : ""}">${head
+      ? `<thead><tr>${rows[0].map((c) => cell("th", c)).join("")}</tr></thead>` : ""}<tbody>${body}</tbody></table></div>`;
+  }
+  const block = (p) => {
+    if (p.startsWith("~~~")) return `<pre class="code">${esc(p.replace(/^~~~[^\n]*\n?/, "").replace(/\n?~~~\s*$/, ""))}</pre>`;
+    if (p.startsWith("@fig ")) return p.trim().split("\n").map((l) => (window.FIGS || {})[l.slice(5).trim()]
+      || `<p class="muted">[missing figure ${esc(l)}]</p>`).join("");
+    if (p.startsWith("|") || p.startsWith("{plain}")) return table(p);
+    if (p.startsWith("- ")) return `<ul>${p.split(/\n(?=- )/).map((li) => `<li>${inlineCode(li.slice(2))}</li>`).join("")}</ul>`;
+    return `<p>${inlineCode(p)}</p>`;
+  };
+  // A code block may hold blank lines: it runs from "~~~" to the next line that is "~~~".
+  const paras = (text) => {
+    const out = [];
+    let code = null;
+    const closes = (c) => /\n~~~\s*$/.test(c) || c.trim() === "~~~";
+    for (const chunk of text.trim().split(/\n\s*\n/)) {
+      if (code !== null) {
+        code += "\n\n" + chunk;
+        if (closes(chunk)) { out.push(block(code)); code = null; }
+      } else if (chunk.startsWith("~~~") && !closes(chunk)) code = chunk;
+      else out.push(block(chunk));
+    }
+    if (code !== null) out.push(block(code));
+    return out.join("");
+  };
 
   function typeset(el) {
     if (window.renderMathInElement) {
@@ -98,6 +142,15 @@
     if (p._value === undefined) p._value = Expr.evaluate(p.answer);
     return p._value;
   };
+
+  // A real (official) problem can have several graded parts. Submissions to a part carry its
+  // index; a submission without a part (a single answer, or "mark solved") solves the problem.
+  const solvedBy = (p, subs) => subs.some((s) => s.result === "correct" && s.part === undefined)
+    || !!(p && p.parts && p.parts.length && p.parts.every((_, i) => subs.some((s) => s.part === i && s.result === "correct")));
+  const SOURCES = { quiz: "Past quiz", worksheet: "Worksheet", practice: "Written practice" };
+  const srcOf = (p) => p.real || "practice";
+  const HAS_REAL = PROBLEMS.some((p) => p.real);
+  const srcPill = (p) => (p.real ? `<span class="pill src-pill src-${p.real}">${SOURCES[p.real]}</span>` : "");
 
   const tolText = (p) => (p.tol === 0 ? "exact" : `${+((p.tol || 5e-4) * 100).toPrecision(3)}%`);
 
@@ -160,7 +213,7 @@
   function inLecFilter(p, v) {
     if (v === "extra") return !p.lec;
     const exam = COURSE.exams[v];
-    if (exam) return p.lec >= exam.from && p.lec <= exam.to;
+    if (exam) return exam.ids ? exam.ids.includes(p.id) : p.lec >= exam.from && p.lec <= exam.to;
     return p.lec === +v;
   }
 
@@ -169,6 +222,7 @@
     let list = PROBLEMS.filter((p) => {
       if (ui.diff && p.diff !== ui.diff) return false;
       if (ui.lec && !inLecFilter(p, ui.lec)) return false;
+      if (HAS_REAL && ui.src && srcOf(p) !== ui.src) return false;
       if (ui.status && statusOf(p.id) !== ui.status) return false;
       if (ui.starredOnly && !(peek(p.id) && peek(p.id).starred)) return false;
       if (ui.topics.length && !ui.topics.every((t) => p.topics.includes(t))) return false;
@@ -264,11 +318,13 @@
             <select id="fLec" title="${esc(COURSE.code)} lecture">
               <option value="">All lectures</option>
               <optgroup label="Exam scope">${Object.entries(COURSE.exams).map(([id, e]) =>
-                `<option value="${id}">${esc(e.name)} (L${e.from}-L${e.to})</option>`).join("")}</optgroup>
+                `<option value="${id}">${esc(e.name)}${e.ids ? "" : ` (L${e.from}-L${e.to})`}</option>`).join("")}</optgroup>
               ${COURSE.units.map((u) => `<optgroup label="${esc(u.name)}">${u.lectures.map((l) =>
                 `<option value="${l.n}">L${l.n}. ${esc(l.title)}</option>`).join("")}</optgroup>`).join("")}
               ${COURSE.extras ? `<option value="extra">${esc(COURSE.extras.option)}</option>` : ""}
             </select>
+            ${HAS_REAL ? `<select id="fSrc" title="Where the problem comes from"><option value="">All sources</option>
+              ${Object.entries(SOURCES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : ""}
             <input id="fQ" type="search" placeholder="Search questions   ( / )" />
             <button class="btn ghost" id="fClear">Clear</button>
             <span class="count" id="fCount"></span>
@@ -293,6 +349,10 @@
     $("#fQ").value = ui.q;
     $("#fLec").value = ui.lec || "";
     $("#fLec").onchange = (e) => { ui.lec = e.target.value; refresh(); };
+    if (HAS_REAL) {
+      $("#fSrc").value = ui.src || "";
+      $("#fSrc").onchange = (e) => { ui.src = e.target.value; refresh(); };
+    }
 
     const refresh = () => { saveUi(); drawTopics(); drawRows(); };
     $("#fDiff").onchange = (e) => { ui.diff = e.target.value; refresh(); };
@@ -300,7 +360,7 @@
     $("#fStar").onchange = (e) => { ui.starredOnly = !!e.target.value; refresh(); };
     $("#fQ").oninput = (e) => { ui.q = e.target.value; refresh(); };
     $("#fClear").onclick = () => {
-      Object.assign(ui, { q: "", diff: "", status: "", topics: [], starredOnly: false, lec: "" });
+      Object.assign(ui, { q: "", diff: "", status: "", topics: [], starredOnly: false, lec: "", src: "" });
       renderList(); saveUi();
     };
     app.querySelectorAll("th[data-sort]").forEach((th) => {
@@ -350,7 +410,7 @@
       const r = peek(p.id);
       return `<tr data-id="${p.id}">
         <td class="col-status" title="${statusOf(p.id)}">${ICONS[statusOf(p.id)]}</td>
-        <td class="title"><a href="#/problem/${p.id}">${p.id}. ${esc(p.title)}</a></td>
+        <td class="title"><a href="#/problem/${p.id}">${p.id}. ${esc(p.title)}</a> ${srcPill(p)}</td>
         <td class="tags-cell">${p.topics.map(esc).join(" · ")}</td>
         <td class="col-diff diff-${p.diff}">${p.diff}</td>
         <td class="col-star"><button class="star ${r && r.starred ? "on" : ""}" data-star="${p.id}" title="Star">${r && r.starred ? "★" : "☆"}</button></td>
@@ -403,6 +463,84 @@
 
   // ---------------------------------------------------------------- problem view
   let timerHandle = null;
+  const IDLE_MS = 5 * 60 * 1000;
+  let lastInput = Date.now();
+  for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "scroll"]) {
+    addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true });
+  }
+  // Keep the last few seconds of timer counts when the tab closes or hides.
+  addEventListener("pagehide", () => save());
+  document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+
+  const partDone = (r, i) => r.submissions.some((s) => s.part === i && s.result === "correct");
+
+  function realAnswerBox(p) {
+    const r = rec(p.id);
+    const rows = p.parts.map((q, i) => `
+      <div class="part-row ${partDone(r, i) ? "ok" : ""}" data-part="${i}">
+        <label for="part${i}">${inlineCode(q.q)}</label>
+        <input id="part${i}" class="answer-input part-input" autocomplete="off" spellcheck="false"
+          placeholder="${partDone(r, i) ? "Correct ✓" : q.tol === 0 ? "exact" : "number or fraction"}" />
+        <span class="part-mark">${partDone(r, i) ? "✓" : ""}</span>
+      </div>`).join("");
+    return `<div class="answer-box">
+      ${p.parts.length ? `<label>Graded parts. Work on paper first, then enter each value.</label>
+        <div class="parts">${rows}</div>` : ""}
+      <p class="muted self-note">${p.parts.length
+        ? "Diagrams, code, and tables are self-checked: compare them with the official solution."
+        : "This problem has no single-number parts. Work it on paper, compare with the official solution, then mark it solved."}</p>
+      <div class="answer-actions">
+        ${p.parts.length ? `<button class="btn primary" id="submit">Check answers</button>` : ""}
+        <span class="spacer"></span>
+        <button class="btn ghost" id="markBtn"></button>
+      </div>
+      <div id="verdict"></div>
+      <div class="syntax-help">Accepted: numbers, fractions like <code>1/27</code>, hex <code>0x1D</code>, binary <code>0b101</code>.
+        Integer parts must match exactly.</div>
+    </div>`;
+  }
+
+  // Grades every filled part box. The problem is solved when all parts have a correct answer.
+  function wireParts(p, r, redraw) {
+    const btn = $("#submit");
+    if (!btn) return;
+    const check = () => {
+      let graded = 0, right = 0, bad = "";
+      p.parts.forEach((q, i) => {
+        const inp = $(`#part${i}`);
+        const s = inp.value.trim();
+        if (!s) return;
+        let v;
+        try { v = Expr.evaluate(s); } catch (err) { bad = `${q.q}: ${err.message}`; return; }
+        const result = Expr.compare(v, Expr.evaluate(q.answer), q.tol);
+        r.submissions.unshift({ t: Date.now(), input: `${q.q.replace(/\$/g, "")} = ${s}`, value: v, result, part: i });
+        graded++;
+        if (result === "correct") { right++; inp.value = ""; }
+        const row = inp.closest(".part-row");
+        row.classList.toggle("ok", result === "correct" || partDone(r, i));
+        row.classList.toggle("bad", result !== "correct");
+        row.querySelector(".part-mark").textContent = result === "correct" ? "✓" : result === "close" ? "≈" : "✗";
+      });
+      if (!graded) {
+        if (bad) $("#verdict").innerHTML = `<div class="verdict wrong">Cannot read that<span class="sub">${esc(bad)}</span></div>`;
+        return;
+      }
+      const all = solvedBy(p, r.submissions);
+      if (all) markSolved(r);
+      else if (r.status !== "solved") r.status = "attempted";
+      save();
+      const left = p.parts.filter((_, i) => !partDone(r, i)).length;
+      $("#verdict").innerHTML = all
+        ? `<div class="verdict correct">Accepted<span class="sub">Every graded part is correct.</span></div>`
+        : `<div class="verdict ${right ? "close" : "wrong"}">${right} of ${graded} correct<span class="sub">${left} part${left === 1 ? "" : "s"} still open.${bad ? " " + esc(bad) : ""}</span></div>`;
+      redraw();
+    };
+    btn.onclick = check;
+    document.querySelectorAll(".part-input").forEach((inp) => {
+      inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); check(); } };
+    });
+    typeset($(".parts"));
+  }
 
   function renderProblem(id, tab) {
     const p = BY_ID.get(id);
@@ -432,14 +570,14 @@
             <a class="btn ghost icon" href="#/problem/${prev.id}" title="Previous (Alt+←)">‹</a>
             <a class="btn ghost icon" href="#/problem/${next.id}" title="Next (Alt+→)">›</a>
             <span class="spacer"></span>
-            <span class="timer" id="timer" title="Time on this problem (this visit)">00:00</span>
+            <span class="timer" id="timer" title="Active time on this problem, all visits (pauses after 5 idle minutes)">00:00</span>
             <button class="btn ghost icon star ${r.starred ? "on" : ""}" id="pStar" title="Star">${r.starred ? "★" : "☆"}</button>
           </div>
         </section>
         <div class="gutter" id="gutter"></div>
         <section class="pane">
           <div class="tabs"><button class="tab on">Answer</button></div>
-          <div class="answer-box">
+          ${p.real ? realAnswerBox(p) : `<div class="answer-box">
             <label for="ans">Your answer: a number or exact expression</label>
             <input id="ans" class="answer-input" autocomplete="off" spellcheck="false" placeholder="${esc(COURSE.answerPlaceholder)}" />
             <div class="preview" id="preview">&nbsp;</div>
@@ -452,7 +590,7 @@
             <div class="syntax-help">Accepted: <code>+ - * / ^ !</code> <code>( )</code> <code>pi</code> <code>e</code>
               <code>sqrt()</code> <code>ln()</code> <code>exp()</code> <code>C(n,k)</code> <code>50%</code> <code>0x1F</code> <code>0b101</code>.
               ${p.tol === 0 ? "This answer must match exactly." : `Answers within ${tolText(p)} relative error are accepted.`}</div>
-          </div>
+          </div>`}
           <div class="subs" id="subs"></div>
         </section>
       </div>`;
@@ -469,10 +607,12 @@
             <span class="pill diff-${p.diff}">${p.diff}</span>
             ${p.lec ? `<a class="pill lec-pill" href="#/course/${p.lec}" title="${esc(COURSE.code)} lecture">${COURSE.code} · ${esc(lecLabel(p.lec))}</a>`
               : `<span class="pill" title="Outside the ${esc(COURSE.code)} syllabus">Interview extra</span>`}
+            ${p.real ? `<span class="pill src-pill src-${p.real}">${esc(p.source)}</span>` : ""}
             ${statusOf(id) === "solved" ? `<span class="pill solved-pill">Solved ✓</span>` : ""}
             ${r.viewedSolution ? `<span class="pill" title="You opened the solution">Solution viewed</span>` : ""}
           </div>
           <div class="statement">${paras(p.statement)}</div>
+          ${p.text && /^@fig /m.test(p.statement) ? `<p class="muted">Click a figure to see it at full size.</p>` : ""}
           <div class="topic-links">${p.topics.map((t) => `<span class="pill" data-topic="${esc(t)}">${esc(t)}</span>`).join("")}</div>`;
         body.querySelector(".topic-links").onclick = (e) => {
           const t = e.target.dataset.topic;
@@ -481,6 +621,10 @@
           saveUi(); location.hash = "#/";
         };
       } else if (name === "hints") {
+        if (!p.hints.length) {
+          body.innerHTML = `<p class="muted">Official problems have no hints. Review the lecture for this topic, or open the solution.</p>`;
+          return;
+        }
         body.innerHTML = p.hints.map((h, i) =>
           `<details class="hint"><summary>Hint ${i + 1}</summary><div class="hint-body">${paras(h)}</div></details>`).join("");
         body.querySelectorAll("details").forEach((d, i) => d.addEventListener("toggle", () => {
@@ -488,7 +632,11 @@
         }));
       } else if (name === "solution") {
         const show = () => {
-          body.innerHTML = `<div class="solution">${paras(p.solution)}</div>
+          body.innerHTML = p.real
+            ? `${p.parts.length ? `<table class="part-key"><tbody>${p.parts.map((q) =>
+                `<tr><td>${inlineCode(q.q)}</td><td><code>${esc(q.answer)}</code></td></tr>`).join("")}</tbody></table>` : ""}
+              <div class="solution">${paras(p.solution)}</div><p class="muted">Official solution: ${esc(p.source)}.</p>`
+            : `<div class="solution">${paras(p.solution)}</div>
             <p class="muted">Answer: <code>${esc(p.answer)}</code> ≈ ${formatNumber(answerValue(p))}</p>`;
           typeset(body);
         };
@@ -526,18 +674,23 @@
     };
     $("#markBtn").onclick = () => {
       if (statusOf(id) === "solved") {
+        r.submissions = r.submissions.filter((s) => !s.self);
         r.status = r.submissions.length ? "attempted" : undefined;
         delete r.solvedAt;
       } else {
-        r.status = "solved";
-        r.solvedAt = Date.now();
+        markSolved(r);
         r.manual = true;
+        // Self-checked parts of an official problem count toward a running practice quiz.
+        if (p.real) r.submissions.unshift({ t: Date.now(), input: "Marked solved (self-check)", result: "correct", self: true });
       }
-      save(); drawMark(); drawTab(tab);
+      save(); drawMark(); drawTab(tab); drawSubs();
     };
     drawMark();
 
-    // answer input
+    if (p.real) wireParts(p, r, () => { drawSubs(); drawMark(); drawTab(tab); });
+    else wireAnswer();
+
+    function wireAnswer() {
     const inp = $("#ans");
     const prevEl = $("#preview");
     inp.oninput = () => {
@@ -559,8 +712,7 @@
       const result = Expr.compare(v, answerValue(p), p.tol);
       r.submissions.unshift({ t: Date.now(), input: s, value: v, result });
       if (result === "correct") {
-        if (r.status !== "solved") r.solvedAt = Date.now();
-        r.status = "solved";
+        markSolved(r);
       } else if (r.status !== "solved") r.status = "attempted";
       save();
       const msg = {
@@ -574,8 +726,9 @@
     };
     $("#submit").onclick = submit;
     inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } };
+    }
 
-    const drawSubs = () => {
+    function drawSubs() {
       const subs = r.submissions;
       $("#subs").innerHTML = `<h4>Submissions (${subs.length})</h4>` + (subs.length
         ? subs.slice(0, 50).map((s) => `<div class="sub-row">
@@ -583,17 +736,26 @@
             <code title="${esc(s.input)}">${esc(s.input)}</code>
             <time>${timeAgo(s.t)}</time></div>`).join("")
         : `<p class="muted">No submissions yet.</p>`);
-    };
+    }
     drawSubs();
 
-    // timer
+    // timer: r.time is the active time over all visits. A second counts while the page is
+    // visible and the user typed, clicked, scrolled, or moved the mouse in the last IDLE_MS.
     clearInterval(timerHandle);
-    const start = Date.now();
+    const showTime = () => {
+      const s = Math.floor((r.time || 0) / 1000);
+      $("#timer").textContent = s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+        : `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    };
+    showTime();
+    lastInput = Date.now();
+    let ticks = 0;
     timerHandle = setInterval(() => {
-      const el = $("#timer");
-      if (!el) { clearInterval(timerHandle); return; }
-      const s = Math.floor((Date.now() - start) / 1000);
-      el.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+      if (!$("#timer")) { clearInterval(timerHandle); return; }
+      if (document.hidden || Date.now() - lastInput > IDLE_MS) return;
+      r.time = (r.time || 0) + 1000;
+      showTime();
+      if (++ticks % 10 === 0) save();
     }, 1000);
 
     // resizable split
@@ -610,7 +772,7 @@
       addEventListener("mouseup", up);
     };
 
-    if (tab === "description" && window.innerWidth > 900) inp.focus();
+    if (tab === "description" && window.innerWidth > 900 && $("#ans")) $("#ans").focus();
   }
 
   // ---------------------------------------------------------------- course view
@@ -715,6 +877,7 @@
   // ---------------------------------------------------------------- practice exams
   function examScope(id) {
     const e = COURSE.exams[id];
+    if (e.ids) return `The ${e.ids.length} problems of the real ${e.name}, ${e.minutes} min`;
     return `${e.count} problems from L${e.from}-L${e.to}, ${e.minutes} min`;
   }
 
@@ -726,23 +889,27 @@
     return a;
   }
 
-  // Spread the draw across lectures: shuffle each lecture's pool, then take one per lecture in turn.
+  // A past-quiz exam has a fixed list of ids. A drawn exam spreads across lectures: shuffle each
+  // lecture's pool of single-answer problems, then take one per lecture in turn.
   function drawExam(id) {
     const e = COURSE.exams[id];
-    const pools = [];
-    for (let n = e.from; n <= e.to; n++) {
-      const pool = shuffle(lecProblems(n));
-      if (pool.length) pools.push(pool);
-    }
-    shuffle(pools);
     const ids = [];
-    while (ids.length < e.count && pools.some((p) => p.length)) {
-      for (const pool of pools) {
-        if (ids.length >= e.count) break;
-        if (pool.length) ids.push(pool.pop().id);
+    if (e.ids) ids.push(...e.ids);
+    else {
+      const pools = [];
+      for (let n = e.from; n <= e.to; n++) {
+        const pool = shuffle(lecProblems(n).filter((p) => !p.real));
+        if (pool.length) pools.push(pool);
       }
+      shuffle(pools);
+      while (ids.length < e.count && pools.some((p) => p.length)) {
+        for (const pool of pools) {
+          if (ids.length >= e.count) break;
+          if (pool.length) ids.push(pool.pop().id);
+        }
+      }
+      ids.sort((a, b) => (BY_ID.get(a).lec - BY_ID.get(b).lec) || a - b);
     }
-    ids.sort((a, b) => (BY_ID.get(a).lec - BY_ID.get(b).lec) || a - b);
     store.exams = store.exams || {};
     store.exams[examKey(id)] = { ids, startedAt: Date.now() };
     save();
@@ -760,7 +927,7 @@
   function examStatus(pid, since) {
     const subs = (peek(pid) && peek(pid).submissions) || [];
     const recent = subs.filter((s) => s.t >= since);
-    if (recent.some((s) => s.result === "correct")) return "solved";
+    if (solvedBy(BY_ID.get(pid), recent)) return "solved";
     if (recent.length) return "attempted";
     return "todo";
   }
@@ -779,13 +946,15 @@
           <div>
             <div class="muted"><a class="link" href="#/course">${COURSE.code}</a> · Practice exam</div>
             <h2>${esc(e.name)}</h2>
-            <p class="muted">${examScope(id)}. A problem counts when you submit a correct answer after the exam starts.
+            <p class="muted">${examScope(id)}. ${e.ids
+              ? "A problem counts when all its graded parts are correct, or when you mark it solved after you check your work against the official solution."
+              : "A problem counts when you submit a correct answer after the exam starts."}
               Earlier solves do not count. Hints and solutions stay available, so hold yourself to exam rules.</p>
           </div>
           <div class="hero-stats">
             <div class="kpi"><div class="v">${score}<span class="muted"> / ${ex.ids.length}</span></div><div class="l">Correct in this attempt</div></div>
             <div class="kpi"><div class="v exam-clock" id="examClock">--:--</div><div class="l" id="examClockLbl">Time left</div></div>
-            <div class="row-btns"><button class="btn ghost" id="newExam">New exam</button></div>
+            <div class="row-btns"><button class="btn ghost" id="newExam">${e.ids ? "Restart" : "New exam"}</button></div>
           </div>
         </section>
         <section class="card">
@@ -800,7 +969,7 @@
       </div>`;
 
     $("#newExam").onclick = () => {
-      if (confirm("Start a new exam? The current draw and timer are replaced.")) { drawExam(id); renderExam(id); }
+      if (confirm(e.ids ? "Restart this quiz? The timer and score start again." : "Start a new exam? The current draw and timer are replaced.")) { drawExam(id); renderExam(id); }
     };
 
     const tick = () => {
@@ -818,6 +987,39 @@
   }
 
   // ---------------------------------------------------------------- stats view
+  function fmtDur(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+    return `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`;
+  }
+  const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+  // A try is one submit: one answer, or one "Check answers" press on an official problem
+  // (its part entries share a timestamp), or one self-check mark.
+  // Returns the number of tries, the wrong tries, and the tries up to the first solve.
+  function tryStats(p, r) {
+    const subs = (r.submissions || []).slice().reverse();
+    const batches = [];
+    subs.forEach((s) => {
+      const b = batches[batches.length - 1];
+      if (b && b.t === s.t) b.list.push(s); else batches.push({ t: s.t, list: [s] });
+    });
+    let toSolve = null;
+    for (let i = 0; i < batches.length && toSolve === null; i++) {
+      if (solvedBy(p, batches.slice(0, i + 1).flatMap((b) => b.list))) toSolve = i + 1;
+    }
+    const wrong = batches.filter((b) => b.list.some((s) => s.result !== "correct")).length;
+    return { tries: batches.length, wrong, toSolve };
+  }
+
+  // Difficulty score for the problems you tried. Each wrong try, opened hint, and 5 minutes
+  // adds 1; an opened solution adds 3; a problem that is still open adds 2.
+  function struggle(p, r, t) {
+    return t.wrong + (r.hintsOpened || 0) + (r.viewedSolution ? 3 : 0)
+      + (statusOf(p.id) === "solved" ? 0 : 2) + (r.time || 0) / 300000;
+  }
+
   function renderStats() {
     const c = counts();
     const all = Object.entries(store.problems).filter(([id]) => BY_ID.has(+id));
@@ -849,15 +1051,55 @@
         <a href="#/problem/${p.id}">${p.id}. ${esc(p.title)}</a><time>${timeAgo(s.t)}</time></div>`;
     }).join("") || `<p class="muted">No submissions yet.</p>`;
 
+    // Per-problem tries and time. Problems solved before time tracking have no solveTime.
+    const tried = all.map(([id, r]) => {
+      const p = BY_ID.get(+id), t = tryStats(p, r);
+      return { p, r, t, score: struggle(p, r, t) };
+    }).filter((x) => x.t.tries || x.r.time >= 30000 || x.r.viewedSolution || x.r.hintsOpened);
+    const solvedX = tried.filter((x) => statusOf(x.p.id) === "solved");
+    const triesSolve = solvedX.map((x) => x.t.toSolve).filter((n) => n);
+    const timeSolve = solvedX.map((x) => x.r.solveTime).filter((ms) => ms > 0);
+    const totalTime = all.reduce((a, [, r]) => a + (r.time || 0), 0);
+    const avgTries = mean(triesSolve);
+    const avgTime = mean(timeSolve);
+
+    const diffRows = DIFFS.map((d) => {
+      const xs = solvedX.filter((x) => x.p.diff === d);
+      const tr = mean(xs.map((x) => x.t.toSolve).filter((n) => n));
+      const tm = mean(xs.map((x) => x.r.solveTime).filter((ms) => ms > 0));
+      return `<tr><td><span class="diff-${d}">${d}</span></td><td>${xs.length}</td>
+        <td>${tr === null ? "—" : tr.toFixed(1)}</td><td>${tm === null ? "—" : fmtDur(tm)}</td></tr>`;
+    }).join("");
+
+    const hardest = tried.slice().sort((a, b) => b.score - a.score).slice(0, 12).map((x) => {
+      const st = statusOf(x.p.id);
+      return `<tr><td><a href="#/problem/${x.p.id}">${x.p.id}. ${esc(x.p.title)}</a></td>
+        <td><span class="diff-${x.p.diff}">${x.p.diff}</span></td>
+        <td>${st === "solved" ? `<span class="ok">Solved</span>` : `<span class="cl">Open</span>`}</td>
+        <td>${x.t.tries}${x.t.wrong ? ` <span class="muted">(${x.t.wrong} wrong)</span>` : ""}</td>
+        <td>${x.r.time ? fmtDur(x.r.time) : "—"}</td>
+        <td>${x.r.hintsOpened || 0}</td><td>${x.r.viewedSolution ? "Yes" : ""}</td></tr>`;
+    }).join("");
+
     $("#app").innerHTML = `
       <div class="stats">
         <div class="stats-grid">
           <div class="card kpi"><div class="v">${c.solved}<span class="muted"> / ${c.total}</span></div><div class="l">Problems solved</div></div>
           <div class="card kpi"><div class="v">${subs.length ? Math.round((100 * accepted) / subs.length) : 0}%</div><div class="l">Acceptance rate (${accepted}/${subs.length} submissions)</div></div>
-          <div class="card kpi"><div class="v">${firstTry}</div><div class="l">Solved on the first submission</div></div>
+          <div class="card kpi"><div class="v">${avgTries === null ? "—" : avgTries.toFixed(1)}</div><div class="l">Average tries to solve (${triesSolve.length} problems, ${firstTry} on the first try)</div></div>
+          <div class="card kpi"><div class="v">${avgTime === null ? "—" : fmtDur(avgTime)}</div><div class="l">Average time to solve (${timeSolve.length} timed problems)</div></div>
+          <div class="card kpi"><div class="v">${fmtDur(totalTime)}</div><div class="l">Total practice time</div></div>
           <div class="card kpi"><div class="v">${viewed}</div><div class="l">Solutions viewed</div></div>
         </div>
-        <div class="card"><h3>Activity (last 16 weeks)</h3><div class="heat">${days.join("")}</div></div>
+        <div class="card"><h3>Hardest problems you tried</h3>${hardest
+          ? `<div class="table-wrap"><table class="topic-table hard-table"><thead><tr><th>Problem</th><th>Level</th><th>Status</th><th>Tries</th><th>Time</th><th>Hints</th><th>Solution</th></tr></thead><tbody>${hardest}</tbody></table></div>
+            <p class="muted small">Ranked by a score: 1 for each wrong try, opened hint, and 5 minutes of active time; 3 for an opened solution; 2 if the problem is still open.</p>`
+          : `<p class="muted">No tried problems yet.</p>`}</div>
+        <div class="stats-grid two-col">
+          <div class="card"><h3>By difficulty (solved problems)</h3><table class="topic-table diff-table"><thead><tr><th>Level</th><th>Solved</th><th>Avg tries</th><th>Avg time</th></tr></thead><tbody>${diffRows}</tbody></table>
+            <p class="muted small">Time counts while the problem page is open and you are active. It pauses after 5 idle minutes. Problems solved before time tracking have no time.</p></div>
+          <div class="card"><h3>Activity (last 16 weeks)</h3><div class="heat">${days.join("")}</div></div>
+        </div>
         <div class="stats-grid two-col">
           <div class="card"><h3>By topic</h3><table class="topic-table" style="width:100%;border-collapse:collapse">${topicRows}</table></div>
           <div class="card"><h3>Recent submissions</h3>${recent}</div>
@@ -875,6 +1117,7 @@
   // ---------------------------------------------------------------- router
   function route() {
     clearInterval(timerHandle);
+    save();
     const h = location.hash.replace(/^#\/?/, "");
     const parts = h.split("/");
     document.querySelectorAll("[data-nav]").forEach((a) => a.classList.remove("active"));
@@ -903,6 +1146,19 @@
   }
 
   addEventListener("hashchange", route);
+  // Click a figure to see it at full size; click again or press Escape to close.
+  document.addEventListener("click", (e) => {
+    const zoom = $(".fig-zoom");
+    if (zoom) { zoom.remove(); return; }
+    const fig = e.target.closest && e.target.closest("svg.fig");
+    if (!fig) return;
+    const el = document.createElement("div");
+    el.className = "fig-zoom";
+    el.innerHTML = fig.outerHTML;
+    el.firstChild.removeAttribute("width");
+    document.body.appendChild(el);
+  });
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && $(".fig-zoom")) $(".fig-zoom").remove(); });
   addEventListener("keydown", (e) => {
     const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
     if (e.key === "/" && !typing && $("#fQ")) { e.preventDefault(); $("#fQ").focus(); }
