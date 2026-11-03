@@ -197,6 +197,7 @@
   courseSel.value = COURSE.code;
   courseSel.onchange = () => switchCourse(courseSel.value);
   $('[data-nav="course"]').textContent = COURSE.code;
+  $('[data-nav="drills"]').hidden = !(window.Drills6191 && COURSE.code === "6.191");
 
   $("#randomBtn").addEventListener("click", () => {
     location.hash = `#/problem/${randomProblem(filtered()).id}`;
@@ -836,6 +837,7 @@
             ${progressBar(done, inSyllabus.length)}
             <div class="row-btns">
               ${Object.entries(COURSE.exams).map(([id, e]) => `<a class="btn ghost" href="#/exam/${id}">${esc(e.name)}</a>`).join("")}
+              ${hasDrills() ? `<a class="btn accent" href="#/drills">Generated drills</a>` : ""}
             </div>
           </div>
         </section>
@@ -1114,6 +1116,156 @@
     };
   }
 
+  // ---------------------------------------------------------------- generated drills (6.191)
+  // js/drills-6191.js makes a new problem for each (type, seed); answers come from simulators.
+  const DR = window.Drills6191;
+  const hasDrills = () => !!DR && COURSE.code === "6.191";
+  const drillRec = (type) => {
+    store.drills = store.drills || {};
+    return (store.drills[type] = store.drills[type] || { tries: 0, solved: 0, time: 0, seen: [] });
+  };
+  const newSeed = () => 1 + Math.floor(Math.random() * 1e6);
+
+  // Text answers: case, spaces, "x5" vs "5", "Valid(3)" vs "V(3)", and numbers in any base all match.
+  const normTxt = (s) => String(s).trim().toLowerCase().replace(/\s+/g, " ").replace(/^x(\d+)$/, "$1")
+    .replace(/\binvalid\b/g, "inv").replace(/\bvalid\(/g, "v(").replace(/\s*([(),])\s*/g, "$1");
+  const numOf = (s) => { try { const v = Expr.evaluate(String(s)); return Number.isFinite(v) ? v : null; } catch { return null; } };
+  function sameTxt(got, want) {
+    if (normTxt(got) === normTxt(want)) return true;
+    const a = numOf(got), b = numOf(want);
+    return a !== null && b !== null && /^[-+0-9a-fx./ ]+$/i.test(String(got).trim()) && Math.abs(a - b) < 1e-9 * Math.max(1, Math.abs(b));
+  }
+  const DONT_CARE = new Set(["?", "x", "-", "dc", "don't care", "dont care"]);
+  function gradePart(q, s) {
+    if (q.dontCare) return DONT_CARE.has(normTxt(s)) ? "correct" : "wrong";
+    if (q.accept) {
+      const c = q.canon ? DR.canon : (x) => x;
+      return q.accept.some((a) => (q.canon ? c(s) === c(a) : sameTxt(s, a))) ? "correct" : "wrong";
+    }
+    let v;
+    try { v = Expr.evaluate(s); } catch { return "unreadable"; }
+    return Expr.compare(v, Expr.evaluate(q.answer), q.tol);
+  }
+  const bypassSet = (s) => String(s).toUpperCase().split(/[\s,+/]+/).filter(Boolean).sort().join(" ");
+  function gradeCell(g, r, c, s) {
+    const want = g.answer[r][c];
+    if (g.kind === "value") return want === "" ? s.trim() === "" : s.trim() !== "" && sameTxt(s, want);
+    return s.trim() !== "" && sameTxt(s.replace(/^bubble$/i, "NOP"), want);
+  }
+
+  function renderDrills() {
+    const cards = Object.entries(DR.DRILLS).map(([type, d]) => {
+      const s = drillRec(type);
+      return `<a class="card drill-card" href="#/drill/${type}/${newSeed()}">
+        <h3>${esc(d.name)}</h3><p class="muted">${esc(d.blurb)}</p>
+        <div class="drill-stat">${s.tries ? `${s.solved} of ${s.tries} fully correct${s.time ? ` · ${fmtDur(s.time / Math.max(1, s.solved))} per solve` : ""}` : "Not tried yet"}</div></a>`;
+    }).join("");
+    $("#app").innerHTML = `<div class="drills">
+      <section class="card"><h2>Drills</h2><p class="muted">Each drill makes a new problem every time from a random seed. The answers come from a pipeline simulator
+        (checked against 9 official 6.191 pipeline diagrams) and a cache simulator (checked against Fall 2025 Quiz 2 Problem 4).
+        The link of a drill keeps its seed, so you can come back to the same problem.</p></section>
+      <div class="drill-grid">${cards}</div></div>`;
+  }
+
+  function renderDrill(type, seed) {
+    if (!DR.DRILLS[type]) { location.hash = "#/drills"; return; }
+    const p = DR.generate(type, seed);
+    const s = drillRec(type);
+    const t0 = Date.now();
+    let counted = false, solvedOnce = false;
+    const gridHtml = (g) => {
+      const bypass = g.bypass ? `<tr class="byp-row"><th>Bypass</th>${g.bypass.map((_, c) =>
+        `<td><input class="cell" data-g="${g.id}" data-r="byp" data-c="${c}" autocomplete="off" spellcheck="false" /></td>`).join("")}</tr>` : "";
+      return `<div class="drill-grid-wrap"><div class="muted small">${esc(g.caption)}</div><div class="tbl-wrap"><table class="tbl grid-in">
+        <thead><tr><th></th>${g.colLabels.map((l) => `<th>${esc(l)}</th>`).join("")}</tr></thead><tbody>
+        ${g.rowLabels.map((lab, r) => `<tr><th>${esc(lab)}</th>${g.colLabels.map((_, c) => {
+          if (g.gray && g.gray[r][c]) return `<td class="gray"></td>`;
+          if (g.given && g.given[r][c]) return `<td class="given">${esc(g.answer[r][c])}</td>`;
+          return `<td><input class="cell" data-g="${g.id}" data-r="${r}" data-c="${c}" autocomplete="off" spellcheck="false" /></td>`;
+        }).join("")}</tr>`).join("")}${bypass}</tbody></table></div></div>`;
+    };
+    $("#app").innerHTML = `<div class="drill">
+      <div class="drill-bar">
+        <a class="btn ghost" href="#/drills">☰ Drills</a>
+        <span class="muted">${esc(DR.DRILLS[type].name)} · seed ${seed}</span>
+        <span class="spacer"></span>
+        <a class="btn accent" href="#/drill/${type}/${newSeed()}">New problem</a>
+      </div>
+      <section class="card">
+        <h1>${esc(p.title)}</h1>
+        <div class="statement">${paras(p.statement)}</div>
+        ${p.grids.map(gridHtml).join("")}
+        ${p.parts.length ? `<div class="parts">${p.parts.map((q, i) => `<div class="part-row" data-part="${i}">
+          <label for="dp${i}">${inlineCode(q.q)}</label>
+          <input id="dp${i}" class="answer-input part-input" autocomplete="off" spellcheck="false" />
+          <span class="part-mark"></span></div>`).join("")}</div>` : ""}
+        <div class="answer-actions">
+          <button class="btn primary" id="dCheck">Check</button>
+          <button class="btn ghost" id="dSol">Show solution</button>
+          <span class="spacer"></span>
+        </div>
+        <div id="verdict"></div>
+        <div class="syntax-help">Numbers may be decimal, hex (<code>0x1C</code>), or fractions (<code>11/9</code>). Text answers ignore case. Write ? for a don't-care.</div>
+      </section>
+      <section class="card" id="dSolBox" hidden><h3>Solution</h3><div class="solution">${paras(p.solution)}</div></section>
+    </div>`;
+
+    const check = () => {
+      let right = 0, total = 0, empty = 0;
+      for (const g of p.grids) {
+        const cellIn = (r, c) => document.querySelector(`.cell[data-g="${g.id}"][data-r="${r}"][data-c="${c}"]`);
+        // Rows in one group (the ways of a set) may come in any order: grade each input row
+        // against the answer row it matches fully, if there is one.
+        const rowMap = g.answer.map((_, r) => r);
+        for (const grp of g.groups || []) {
+          const free = grp.slice();
+          const full = (ri, ai) => g.answer[ai].every((_, c) => !cellIn(ri, c) || gradeCell(g, ai, c, cellIn(ri, c).value));
+          for (const ri of grp) { const k = free.findIndex((ai) => full(ri, ai)); if (k >= 0) rowMap[ri] = free.splice(k, 1)[0]; else rowMap[ri] = -1; }
+          for (const ri of grp) if (rowMap[ri] < 0) rowMap[ri] = free.shift();
+        }
+        document.querySelectorAll(`.cell[data-g="${g.id}"]`).forEach((inp) => {
+          const c = +inp.dataset.c;
+          let ok;
+          if (inp.dataset.r === "byp") ok = bypassSet(inp.value) === bypassSet(g.bypass[c].join(" "));
+          else {
+            const r = rowMap[+inp.dataset.r];
+            if (!inp.value.trim() && g.answer[r][c] !== "") empty++;
+            ok = gradeCell(g, r, c, inp.value);
+          }
+          total++; if (ok) right++;
+          inp.classList.toggle("ok", ok); inp.classList.toggle("bad", !ok);
+        });
+      }
+      p.parts.forEach((q, i) => {
+        const inp = $(`#dp${i}`), v = inp.value.trim();
+        const res = v ? gradePart(q, v) : "wrong";
+        if (!v) empty++;
+        total++; if (res === "correct") right++;
+        const row = inp.closest(".part-row");
+        row.classList.toggle("ok", res === "correct"); row.classList.toggle("bad", res !== "correct");
+        row.querySelector(".part-mark").textContent = res === "correct" ? "✓" : res === "close" ? "≈" : "✗";
+      });
+      if (!counted) { s.tries++; counted = true; }
+      const all = right === total;
+      if (all && !solvedOnce) { solvedOnce = true; s.solved++; s.time += Date.now() - t0; }
+      save();
+      $("#verdict").innerHTML = all
+        ? `<div class="verdict correct">All correct<span class="sub">${total} answers. Press “New problem” for another one.</span></div>`
+        : `<div class="verdict ${right ? "close" : "wrong"}">${right} of ${total} correct<span class="sub">Red cells are wrong${empty ? `; ${empty} still empty` : ""}.</span></div>`;
+    };
+    $("#dCheck").onclick = check;
+    $("#app").querySelector(".drill").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target.matches("input")) { e.preventDefault(); check(); }
+    });
+    $("#dSol").onclick = () => {
+      const box = $("#dSolBox");
+      box.hidden = !box.hidden;
+      $("#dSol").textContent = box.hidden ? "Show solution" : "Hide solution";
+      if (!box.hidden) { if (!counted) { s.tries++; counted = true; save(); } typeset(box); box.scrollIntoView({ block: "start", behavior: "smooth" }); }
+    };
+    typeset($("#app"));
+  }
+
   // ---------------------------------------------------------------- router
   function route() {
     clearInterval(timerHandle);
@@ -1133,6 +1285,15 @@
       $('[data-nav="course"]').classList.add("active");
       renderExam(parts[1]);
       document.title = `${(COURSE.exams[parts[1]] || {}).name || "Exam"} - ProbTrainer`;
+    } else if (parts[0] === "drills" && hasDrills()) {
+      $('[data-nav="drills"]').classList.add("active");
+      renderDrills();
+      document.title = "Drills - ProbTrainer";
+    } else if (parts[0] === "drill" && parts[1] && hasDrills()) {
+      $('[data-nav="drills"]').classList.add("active");
+      if (!(+parts[2] > 0)) { location.hash = `#/drill/${parts[1]}/${newSeed()}`; return; }
+      renderDrill(parts[1], +parts[2]);
+      document.title = `${(DR.DRILLS[parts[1]] || {}).name || "Drill"} - ProbTrainer`;
     } else if (parts[0] === "stats") {
       $('[data-nav="stats"]').classList.add("active");
       renderStats();

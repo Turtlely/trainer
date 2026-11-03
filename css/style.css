@@ -137,7 +137,7 @@ button { font: inherit; color: inherit; }
 .bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
 .bar > div { height: 100%; border-radius: 3px; }
 .side .meta { color: var(--text-3); font-size: 12px; margin-top: 12px; }
-.side .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.side .row-btns, .hero-stats .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- problem page ---------- */
 .workspace {
@@ -350,3 +350,25 @@ textarea.notes:focus { border-color: var(--accent); }
 }
 .course-sel:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 640px) { .course-sel { max-width: 110px; } }
+
+/* generated drills */
+.drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.drill-card { display: block; color: inherit; text-decoration: none; margin: 0; }
+.drill-card:hover { border-color: var(--accent); }
+.drill-card p { font-size: 13px; margin: 0 0 10px; }
+.drill-stat { font-size: 12px; color: var(--text-2); }
+.drill { max-width: 1100px; margin: 0 auto; }
+.drill h1 { font-size: 20px; margin: 0 0 12px; }
+.drill-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.drill .parts { display: grid; gap: 8px; margin: 14px 0; max-width: 640px; }
+.drill .answer-actions { display: flex; gap: 8px; margin: 12px 0; }
+.drill-grid-wrap { margin: 14px 0; }
+table.grid-in th, table.grid-in td { padding: 2px; text-align: center; }
+table.grid-in td.gray { background: repeating-linear-gradient(45deg, var(--border), var(--border) 3px, transparent 3px, transparent 7px); min-width: 48px; }
+table.grid-in td.given { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+table.grid-in .cell { width: 58px; padding: 4px; font: 13px ui-monospace, Consolas, monospace; text-align: center;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--text-3, #666); border-radius: 4px; }
+table.grid-in .cell:focus { outline: none; border-color: var(--accent); }
+table.grid-in .cell.ok { border-color: var(--ok); background: rgba(44, 187, 93, .12); }
+table.grid-in .cell.bad { border-color: var(--bad); background: rgba(239, 71, 67, .12); }
+table.grid-in .byp-row th { font-size: 12px; color: var(--text-2); }

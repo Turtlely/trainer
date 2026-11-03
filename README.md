@@ -20,6 +20,17 @@ A course selector in the top bar switches between 6.3700 (probability) and 6.191
   style, so they follow the light and dark themes. Click a figure to see it at full size. Each
   numeric part has its own answer box. The other 180 are written practice problems modeled on
   them. The list has a source filter (past quiz, worksheet, written practice).
+- 6.191 generated drills (the Drills tab). Each drill makes a new problem from a random seed, and
+  the link keeps the seed. There are 10 types: pipeline diagrams for a loop (fill in the grid and
+  the bypass row, under random bypass paths, branch and jump resolve stages, and load timing; then
+  stalls, annulments, CPI, clock period, and the unpipelined time), cache traces (direct-mapped,
+  set-associative, or fully associative; unified or split; fill in the final cache, hits, misses,
+  and write-backs), cache hit ratios of loops, cache geometry and AMAT, K-stage pipelining of a
+  circuit, composed pipelines, decoder outputs, pipeline and cache facts, Minispec state over
+  cycles, and area and delay scaling. The answers come from `js/sim-6191.js`: a pipeline
+  simulator (checked against 9 official pipeline diagrams by `scripts/check-sim.js`) and a cache
+  simulator (checked against Fall 2025 Quiz 2 Problem 4 by `scripts/check-drills.js`).
+  The generators are in `js/drills-6191.js`.
 - Timed practice exams (6.3700: Quiz 1, Quiz 2, Final; 6.191: Quiz 2) drawn at random across the
   lectures in scope. 6.191 also has the three past Quiz 2 exams as fixed 2-hour exams.
 - Problem list with search, difficulty / status / topic filters, sorting, and stars.
@@ -85,7 +96,8 @@ bad escapes.
 ## Deploy to GitHub Pages
 
 The workflow `.github/workflows/pages.yml` deploys the site on every push to `main`.
-It runs `scripts/check.js` first, so a broken problem bank stops the deploy.
+It runs `scripts/check.js`, `scripts/check-sim.js`, and `scripts/check-drills.js` first, so a
+broken problem bank, simulator, or drill stops the deploy.
 
 1. Create a repository on GitHub and push `main` to it.
 2. In the repository, go to **Settings > Pages**.
