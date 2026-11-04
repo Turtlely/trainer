@@ -82,7 +82,7 @@
     let st = { IF: mk(fetchSi++), DEC: NOP(), EXE: NOP(), MEM: NOP(), WB: NOP() };
     const issued = []; // { ins, seq, exeCycle } for instructions that left DEC
     const rows = { IF: [], DEC: [], EXE: [], MEM: [], WB: [] };
-    const arrows = [], fetches = [{ si: startSi, cycle: 0 }], stalls = [];
+    const arrows = [], fetches = [{ si: startSi, cycle: 0 }], stalls = [], stallSi = [];
     const name = (e) => (e.nop ? "NOP" : e.ins.op);
     // Where the value of register r for instruction d comes from at cycle c: null (stall), "RF", or a stage.
     function source(d, r, c) {
@@ -138,7 +138,7 @@
           }
         }
         if (stall) {
-          stalls.push(c);
+          stalls.push(c); stallSi.push(d.si);
           next.EXE = NOP(); next.DEC = st.DEC; next.IF = st.IF;
         } else {
           if (!d.nop) { issued.push({ ins: d.ins, seq: d.seq, exeCycle: c + 1 }); for (const s of new Set(srcs)) if (s !== "RF") arrows.push([s, "DEC", c]); }
@@ -152,7 +152,7 @@
       }
       st = next;
     }
-    return { rows, arrows, fetches, stalls, cycles: nCycles };
+    return { rows, arrows, fetches, stalls, stallSi, cycles: nCycles };
   }
 
   // Steady-state window: starts when the loop head (static index head) is fetched for the

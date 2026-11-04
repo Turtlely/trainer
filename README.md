@@ -21,13 +21,18 @@ A course selector in the top bar switches between 6.3700 (probability) and 6.191
   numeric part has its own answer box. The other 180 are written practice problems modeled on
   them. The list has a source filter (past quiz, worksheet, written practice).
 - 6.191 generated drills (the Drills tab). Each drill makes a new problem from a random seed, and
-  the link keeps the seed. There are 10 types: pipeline diagrams for a loop (fill in the grid and
-  the bypass row, under random bypass paths, branch and jump resolve stages, and load timing; then
-  stalls, annulments, CPI, clock period, and the unpipelined time), cache traces (direct-mapped,
+  the link keeps the seed. There are 13 types: pipeline diagrams for a loop (a past-quiz loop or a
+  randomly generated one; fill in the grid and the bypass row, under random bypass paths, branch
+  and jump resolve stages, and load timing; then stalls, annulments, CPI, clock period, and the
+  unpipelined time), straight-line code from an empty pipeline (with the NOPs a compiler must
+  insert when there is no stall logic), the same loop on two processors, cache traces (direct-mapped,
   set-associative, or fully associative; unified or split; fill in the final cache, hits, misses,
   and write-backs), cache hit ratios of loops, cache geometry and AMAT, K-stage pipelining of a
-  circuit, composed pipelines, decoder outputs, pipeline and cache facts, Minispec state over
-  cycles, and area and delay scaling. The answers come from `js/sim-6191.js`: a pipeline
+  circuit (you can also click edges to place registers, and the page checks that the pipeline is
+  valid and gives its period and latency), composed pipelines, decoder outputs, pipeline and cache facts, Minispec state over
+  cycles, Minispec writing (fill in the blanks of a module or function template, like Fall 2025
+  Problem 1), and area and delay scaling. The progress page has a Drills section with results per
+  drill type and the recent attempts. The answers come from `js/sim-6191.js`: a pipeline
   simulator (checked against 9 official pipeline diagrams by `scripts/check-sim.js`) and a cache
   simulator (checked against Fall 2025 Quiz 2 Problem 4 by `scripts/check-drills.js`).
   The generators are in `js/drills-6191.js`.

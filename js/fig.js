@@ -147,6 +147,19 @@
         s += box(cx - bw2 / 2, cy - bh2 / 2, bw2, bh2, label, Object.assign({ s: 14 }, o.font, no));
       }
     }
+    // o.bad: node ids to outline in red. o.hit: wide transparent click targets on the edges
+    // (data-e="A>B"), drawn last so they are on top.
+    for (const id of o.bad || []) {
+      const [cx, cy] = nodes[id], [bw2, bh2] = size(id);
+      s += `<rect class="bx nofill bad" x="${r1(cx - bw2 / 2 - 5)}" y="${r1(cy - bh2 / 2 - 5)}" width="${bw2 + 10}" height="${bh2 + 10}" rx="6" stroke-width="2.5"/>`;
+    }
+    if (o.hit) for (const e of edges) {
+      const [a, b, eo = {}] = typeof e === "string" ? e.split(">").concat([{}]) : e;
+      const via = eo.via || [];
+      const first = via[0] || nodes[b], last = via[via.length - 1] || nodes[a];
+      const p = [clip(a, first[0], first[1]), ...via, clip(b, last[0], last[1])];
+      s += `<polyline class="hit" data-e="${esc(`${a}>${b}`)}" points="${p.map(([x, y]) => `${r1(x)},${r1(y)}`).join(" ")}"/>`;
+    }
     return s;
   }
 

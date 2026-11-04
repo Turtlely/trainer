@@ -49,4 +49,59 @@ for (const type of Object.keys(D.DRILLS)) {
   if (bad) fails++;
   console.log(bad ? `FAIL ${type} (${bad}/150)` : `ok   ${type}`);
 }
+// Register placement: each solution placement of the pipelining drill must grade as valid with
+// its own stage count and period. No registers must fail, and one register less on an output must
+// fail or give one stage less.
+{
+  let bad = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const pl = D.generate("kstage", seed).place;
+    for (const g of pl.targets) {
+      const r = D.evalPlacement(pl, g.regs);
+      if (!r.ok || r.K !== g.K || r.P !== g.P) { if (bad++ < 3) console.log(`FAIL placement seed ${seed} ${g.label}:`, r, g.K, g.P); }
+      const o = `${Object.keys(g.regs).find((e) => e.endsWith(">" + pl.outs[0]))}`;
+      const less = { ...g.regs, [o]: g.regs[o] - 1 };
+      const r2 = D.evalPlacement(pl, less);
+      if (r2.ok && r2.K !== g.K - 1) { if (bad++ < 3) console.log(`FAIL placement seed ${seed}: one register less gives`, r2); }
+    }
+    if (D.evalPlacement(pl, {}).ok) bad++;
+  }
+  if (bad) fails++;
+  console.log(bad ? `FAIL register placement (${bad})` : "ok   register placement");
+}
+// The pipelining figures must have no crossing edges and no edge through a box (box 50 x 30).
+{
+  let bad = 0;
+  const cross = (p, q, r, s) => {
+    const d = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+    return d(p, q, r) * d(p, q, s) < 0 && d(r, s, p) * d(r, s, q) < 0;
+  };
+  for (let seed = 1; seed <= 500; seed++) {
+    const pl = D.generate("kstage", seed).place;
+    const E = pl.drawEdges.map((e) => {
+      const [a, b, o = {}] = typeof e === "string" ? e.split(">") : e;
+      return { a, b, p: [pl.gn[a], ...(o.via || []), pl.gn[b]].map(([x, y]) => [x, y]) };
+    });
+    let err = "";
+    for (let i = 0; i < E.length && !err; i++) {
+      for (let j = i + 1; j < E.length && !err; j++) {
+        const [e, f] = [E[i], E[j]];
+        if (e.a === f.a || e.a === f.b || e.b === f.a || e.b === f.b) continue;
+        for (let s = 0; s + 1 < e.p.length; s++) for (let t = 0; t + 1 < f.p.length; t++)
+          if (cross(e.p[s], e.p[s + 1], f.p[t], f.p[t + 1])) err = `edges ${e.a}>${e.b} and ${f.a}>${f.b} cross`;
+      }
+      for (const [id, [cx, cy]] of Object.entries(pl.gn)) {
+        if (id[0] === "@" || id === E[i].a || id === E[i].b) continue;
+        const p = E[i].p;
+        for (let s = 0; s + 1 < p.length; s++) for (let k = 0; k <= 100; k++) {
+          const x = p[s][0] + (p[s + 1][0] - p[s][0]) * k / 100, y = p[s][1] + (p[s + 1][1] - p[s][1]) * k / 100;
+          if (Math.abs(x - cx) < 27 && Math.abs(y - cy) < 17) err = `edge ${E[i].a}>${E[i].b} goes through ${id}`;
+        }
+      }
+    }
+    if (err && bad++ < 3) console.log(`FAIL figure seed ${seed}: ${err}`);
+  }
+  if (bad) fails++;
+  console.log(bad ? `FAIL pipelining figures (${bad})` : "ok   pipelining figures have no crossings");
+}
 process.exit(fails ? 1 : 0);

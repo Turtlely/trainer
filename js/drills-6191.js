@@ -123,75 +123,163 @@ L3:   sw x12, 0x400(x0)
       xor x12, x12, x0`, other: "random" },
   ];
   const CONFIGS = [
-    { bypass: ["EXE", "MEM", "WB"], text: "full bypassing (EXE → DEC, MEM → DEC, WB → DEC)" },
-    { bypass: [], text: "no bypass paths (a value can be read from the register file the cycle after the producer is in WB)" },
-    { bypass: ["WB"], text: "only a WB → DEC bypass path" },
-    { bypass: ["MEM", "WB"], text: "MEM → DEC and WB → DEC bypass paths (no EXE → DEC)" },
-    { bypass: ["EXE", "WB"], text: "EXE → DEC and WB → DEC bypass paths (no MEM → DEC)" },
-    { bypass: ["EXE", "MEM"], text: "EXE → DEC and MEM → DEC bypass paths (no WB → DEC)" },
+    { bypass: ["EXE", "MEM", "WB"], text: "full bypassing (EXE → DEC, MEM → DEC, WB → DEC)", short: "full bypassing" },
+    { bypass: [], text: "no bypass paths (a value can be read from the register file in the cycle after the producer is in WB)", short: "no bypass paths" },
+    { bypass: ["WB"], text: "only a WB → DEC bypass path", short: "WB → DEC only" },
+    { bypass: ["MEM", "WB"], text: "MEM → DEC and WB → DEC bypass paths (no EXE → DEC)", short: "MEM and WB → DEC" },
+    { bypass: ["EXE", "WB"], text: "EXE → DEC and WB → DEC bypass paths (no MEM → DEC)", short: "EXE and WB → DEC" },
+    { bypass: ["EXE", "MEM"], text: "EXE → DEC and MEM → DEC bypass paths (no WB → DEC)", short: "EXE and MEM → DEC" },
+    { bypass: ["EXE"], text: "only an EXE → DEC bypass path", short: "EXE → DEC only" },
+    { bypass: ["MEM"], text: "only a MEM → DEC bypass path", short: "MEM → DEC only" },
   ];
 
-  function pipelineDrill(R) {
-    const loop = R.pick(LOOPS);
+  // A processor: bypass paths, where branches and jumps resolve, and when load data is ready.
+  const machineKey = (m) => [m.bypass.join(), m.branchIn, m.loadReady, m.jalIn].join("|");
+  function pickMachine(R, avoid) {
+    for (;;) {
+      const cfgPick = R.next() < 0.3 ? CONFIGS[0] : R.pick(CONFIGS);
+      const branchIn = R.next() < 0.65 ? "EXE" : "DEC";
+      const loadReady = R.next() < 0.75 ? "WB" : "MEM";
+      const jalIn = branchIn === "DEC" ? "DEC" : R.next() < 0.6 ? "EXE" : "DEC";
+      const m = { cfgPick, bypass: cfgPick.bypass, branchIn, loadReady, jalIn };
+      if (!avoid || machineKey(m) !== machineKey(avoid)) return m;
+    }
+  }
+  function machineSpec(m, { control = true } = {}) {
+    const out = [`5-stage pipeline (IF, DEC, EXE, MEM, WB) with ${m.cfgPick.text}.`];
+    if (control) {
+      out.push(`Branches are predicted not taken (fetch PC + 4) and resolve in **${m.branchIn}**; ${m.branchIn === "DEC" ? "a branch in DEC needs its source registers there, like any other instruction" : "instructions fetched after a taken branch are annulled"}.`,
+        `Jumps ([[j]]/[[jal]]) redirect fetch in **${m.jalIn}**; [[ret]]/[[jalr]] resolve in ${m.branchIn}.`);
+    }
+    out.push(m.bypass.length
+      ? `Load data is ready in the **${m.loadReady}** stage${m.loadReady === "WB" ? " (clocked data memory, as in lecture)" : " (data memory returns in the same cycle)"}. A load value can use a bypass path from that stage or a later one, if the processor has that path.`
+      : "Without bypass paths, a load result is also read from the register file only after the load leaves WB.",
+      "The register file is written at the end of WB and read in DEC.");
+    return out;
+  }
+  const simCfg = (m, taken) => ({ bypass: m.bypass, loadReady: m.loadReady, branchIn: m.branchIn, jalIn: m.jalIn, taken });
+  const stageDelays = (R) => ({ IF: R.int(2, 5), DEC: R.int(3, 6), EXE: R.int(5, 10), MEM: R.int(4, 9), WB: R.int(2, 4), BYP: R.int(1, 2) });
+  const delayText = (d) => `IF ${d.IF} ns, DEC ${d.DEC} ns, EXE ${d.EXE} ns, MEM ${d.MEM} ns, WB ${d.WB} ns, and the bypass muxes (in DEC) ${d.BYP} ns`;
+  // Each bypass source stage drives the bypass muxes in the same cycle; DEC always goes through the muxes
+  // when there is any bypass path.
+  function clockOf(d, bypass) {
+    const byp = new Set(bypass);
+    const paths = [["IF", d.IF], [byp.size ? "DEC + BYP" : "DEC", d.DEC + (byp.size ? d.BYP : 0)]];
+    for (const s of ["EXE", "MEM", "WB"]) paths.push([byp.has(s) ? `${s} + BYP` : s, d[s] + (byp.has(s) ? d.BYP : 0)]);
+    const tclk = Math.max(...paths.map((p) => p[1]));
+    return { tclk, crit: paths.find((p) => p[1] === tclk)[0] };
+  }
+
+  // ---- random code
+  const ALU3 = ["add", "sub", "xor", "or", "and", "slt"];
+  const ALUI = ["addi", "slli", "srli", "andi", "xori"];
+  // Straight-line instructions with short dependency distances (mostly on the last 1-3 results).
+  function genBody(R, n, ptr, { stores = true } = {}) {
+    const pool = R.shuffle(["a1", "a2", "a4", "a5", "t0", "t1", "t2", "t3"]).slice(0, 5);
+    const live = [];
+    const src = () => (live.length && R.chance(0.8) ? live[live.length - 1 - Math.min(live.length - 1, R.int(0, 2))] : R.pick(pool));
+    const dst = () => R.pick(pool);
+    const off = () => 4 * R.int(0, 8);
+    const body = [];
+    for (let i = 0; i < n; i++) {
+      const k = i === 0 ? "load" : R.pick(stores ? ["load", "alu", "alu", "alui", "store"] : ["load", "alu", "alu", "alui"]);
+      if (k === "load") { const d = dst(); body.push(`${R.chance(0.85) ? "lw" : "lb"} ${d}, ${off()}(${ptr})`); live.push(d); }
+      else if (k === "alu") { const a = src(); let b = src(); if (b === a) b = R.pick(pool.filter((x) => x !== a)); const d = dst(); body.push(`${R.pick(ALU3)} ${d}, ${a}, ${b}`); live.push(d); }
+      else if (k === "alui") { const op = R.pick(ALUI), a = src(), d = dst(); body.push(`${op} ${d}, ${a}, ${op[0] === "s" ? R.int(1, 3) : R.int(1, 15)}`); live.push(d); }
+      else body.push(`sw ${src()}, ${off()}(${ptr})`);
+    }
+    return { body, live, pool };
+  }
+  const fmtLines = (lines) => lines.map(([label, text]) => `${(label ? label + ":" : "").padEnd(6)}${text}`).join("\n");
+
+  // A random loop: bottom-tested (bnez/bne back to loop) or top-tested (beqz to done + j loop),
+  // sometimes with an if that skips one instruction.
+  function genLoop(R) {
+    const { body, live, pool } = genBody(R, R.int(3, 5), "a0");
+    const at = (k) => R.int(1, body.length);
+    body.splice(at(), 0, "addi a0, a0, 4");
+    const top = R.chance(0.35);
+    if (!top) body.splice(at(), 0, "addi a3, a3, -1");
+    let skip = null;
+    if (R.chance(0.45)) {
+      const p = R.int(1, body.length - 1);
+      const x = live[R.int(0, live.length - 1)];
+      body.splice(p, 0, R.chance(0.5) ? `beqz ${x}, skip` : `blt ${x}, ${R.pick(pool)}, skip`);
+      skip = p + 2; // the skipped instruction is body[p + 1]
+    }
+    const lines = body.map((t) => [null, t]);
+    if (top) { lines.unshift([null, "beqz a3, done"]); lines.push([null, "addi a3, a3, -1"], [null, "j loop"]); if (skip !== null) skip += 1; }
+    else lines.push([null, R.chance(0.6) ? "bnez a3, loop" : "bne a0, a6, loop"]);
+    if (skip !== null) lines[skip][0] = "skip";
+    lines[0][0] = "loop";
+    const last = live[live.length - 1];
+    lines.push([top ? "done" : null, `mv a0, ${last}`], [null, R.chance(0.5) ? "ret" : `sw ${last}, 0(a1)`]);
+    return { name: "generated loop", head: "loop", src: fmtLines(lines), skipOutcome: R.chance(0.5) };
+  }
+
+  // Loop text, the program, and each branch's fixed outcome. The loop branch is taken, a top
+  // test is never taken, other branches have one outcome per problem.
+  function loopSetup(R) {
+    const loop = R.next() < 0.5 ? R.pick(LOOPS) : genLoop(R);
     const prog = parseProgram(loop.src);
     const head = prog.findIndex((i) => i.label === loop.head);
-    const loopBranch = prog.map((ins, i) => ins.kind === "branch" && ins.ti === head ? i : -1).filter((i) => i >= 0).pop();
-    const other = loop.other === "random" ? R.chance(0.5) : loop.other === true;
-    const cfgPick = R.next() < 0.4 ? CONFIGS[0] : R.pick(CONFIGS);
-    const branchIn = R.next() < 0.7 ? "EXE" : "DEC";
-    const loadReady = R.next() < 0.8 ? "WB" : "MEM";
-    const jalIn = branchIn === "DEC" ? "DEC" : R.next() < 0.7 ? "EXE" : "DEC";
-    const cfg = { bypass: cfgPick.bypass, loadReady, branchIn, jalIn, taken: (si) => (si === loopBranch ? true : other) };
-    const w = pipeWindow(prog, cfg, head, { iteration: 4 });
+    const outcome = {};
+    const other = loop.skipOutcome !== undefined ? loop.skipOutcome : loop.other === "random" ? R.chance(0.5) : loop.other === true;
+    prog.forEach((ins, i) => {
+      if (ins.kind !== "branch") return;
+      if (ins.ti === head) outcome[i] = true;
+      else if (ins.target === "done" && loop.skipOutcome !== undefined) outcome[i] = false;
+      else outcome[i] = other;
+    });
+    const loopBranch = Object.keys(outcome).find((i) => prog[i].ti === head);
+    const others = Object.keys(outcome).filter((i) => prog[i].ti !== head);
+    const text = `${loopBranch !== undefined ? "The loop branch is **always taken** (the loop runs many times)." : "The loop runs many times."}${others.map((i) => ` [[${prog[i].text}]] is **${outcome[i] ? "always taken" : "never taken"}**.`).join("")}`;
+    return { loop, prog, head, taken: (si) => !!outcome[si], outcomeText: text };
+  }
+
+  function pipeFigure(rows, gray, arrows, start, len) {
+    return F.pipe({ start, rows: Object.fromEntries(STAGES.map((s, r) => [s, rows[r].map((v, c) => (gray[r][c] ? "#" : v))])),
+      arrows: arrows.filter(([s, , c]) => c < len && !gray[STAGES.indexOf(s)][c]).map(([s, , c]) => [s, "DEC", start + c]), cw: 44 });
+  }
+
+  function pipelineDrill(R) {
+    const L = loopSetup(R);
+    const m = pickMachine(R);
+    const w = pipeWindow(L.prog, simCfg(m, L.taken), L.head, { iteration: 4 });
     const len = Math.min(w.len, 18);
-    const start = 100;
-    const otherBranches = prog.filter((ins, i) => ins.kind === "branch" && i !== loopBranch);
-    const outcomeText = otherBranches.length ? ` ${otherBranches.map((b) => `[[${b.text}]]`).join(", ")} is **${other ? "always taken" : "never taken"}**.` : "";
-    const delays = { IF: R.int(2, 5), DEC: R.int(3, 6), EXE: R.int(5, 10), MEM: R.int(4, 9), WB: R.int(2, 4), BYP: R.int(1, 2) };
-    const byp = new Set(cfgPick.bypass);
-    const paths = [["IF", delays.IF], ["DEC", delays.DEC + (byp.size ? delays.BYP : 0)]];
-    for (const s of ["EXE", "MEM", "WB"]) paths.push([s, delays[s] + (byp.has(s) ? delays.BYP : 0)]);
-    const tclk = Math.max(...paths.map((p) => p[1]));
-    const crit = paths.find((p) => p[1] === tclk);
-    const single = delays.IF + delays.DEC + delays.EXE + delays.MEM + delays.WB;
+    const start = R.pick([100, 200, 1000, 37, 64]);
+    const d = stageDelays(R);
+    const { tclk, crit } = clockOf(d, m.bypass);
+    const single = d.IF + d.DEC + d.EXE + d.MEM + d.WB;
     const rows = STAGES.map((s) => w.rows[s].slice(0, len));
     const gray = rows.map((_, r) => rows[r].map((_, c) => c < r));
     const given = rows.map((_, r) => rows[r].map((_, c) => r === 0 && c === 0));
     const bypassAns = Array.from({ length: len }, (_, c) => w.arrows.filter(([s, , cc]) => cc === c && cc >= STAGES.indexOf(s)).map(([s]) => s));
     const colLabels = rows[0].map((_, c) => String(start + c));
-    const spec = [
-      `5-stage pipeline (IF, DEC, EXE, MEM, WB) with ${cfgPick.text}.`,
-      `Branches are predicted not taken (fetch PC + 4) and resolve in **${branchIn}**; ${branchIn === "DEC" ? "a branch in DEC needs its source registers there, like any other instruction" : "instructions fetched after a taken branch are annulled"}.`,
-      `Jumps ([[j]]/[[jal]]) redirect fetch in **${jalIn}**; [[ret]]/[[jalr]] resolve in ${branchIn}.`,
-      `Load data is available for bypassing from the **${loadReady}** stage${loadReady === "WB" ? " (clocked data memory, as in lecture)" : " (data memory returns in the same cycle)"}.`,
-      "The register file is written at the end of WB and read in DEC.",
-    ];
-    const statement = `**Pipeline diagram (${loop.name}).** This loop runs on a processor with these features:
+    const statement = `**Pipeline diagram (${L.loop.name}).** This loop runs on a processor with these features:
 
-${spec.map((s) => "- " + s).join("\n")}
+${machineSpec(m).map((s) => "- " + s).join("\n")}
 
 ~~~
-${loop.src.trim()}
+${L.loop.src.trim()}
 ~~~
 
-${loopBranch !== undefined ? "The loop branch is **always taken** (the loop runs many times)." : "The loop runs many times."}${outcomeText} The loop is in steady state. In cycle ${start} the instruction at [[${loop.head}]] is fetched.
+${L.outcomeText} The loop is in steady state. In cycle ${start} the instruction at [[${L.loop.head}]] is fetched.
 
 **(A)** Fill in the pipeline diagram for cycles ${start} to ${start + len - 1}. Write NOP for a bubble or an annulled slot. Cells shaded gray belong to earlier iterations and are not graded. In the **Bypass** row, write the stage(s) that bypass a value into DEC in that cycle (EXE, MEM, or WB, separated by spaces), or leave it empty.
 
 **(B)** Give the cycles per loop iteration, the cycles lost to stalls, and the cycles lost to annulments.
 
-**(C)** The stage delays are IF ${delays.IF} ns, DEC ${delays.DEC} ns, EXE ${delays.EXE} ns, MEM ${delays.MEM} ns, WB ${delays.WB} ns, and the bypass muxes (in DEC) ${delays.BYP} ns. A bypassed value goes through its source stage and then the bypass muxes in the same cycle. Registers are ideal. Give the minimum clock period, the time per iteration, and the CPI of the loop. Then give the time per iteration on an unpipelined single-cycle processor built from the same logic (clock period = sum of the five stage delays, CPI = 1).`;
-    const solPipe = F.pipe({ start, rows: Object.fromEntries(STAGES.map((s, r) => [s, rows[r].map((v, c) => (gray[r][c] ? "#" : v))])),
-      arrows: w.arrows.filter(([s, , c]) => c < len && c >= STAGES.indexOf(s)).map(([s, , c]) => [s, "DEC", start + c]), cw: 44 });
+**(C)** The stage delays are ${delayText(d)}. A bypassed value goes through its source stage and then the bypass muxes in the same cycle. Registers are ideal. Give the minimum clock period, the time per iteration, and the CPI of the loop. Then give the time per iteration on an unpipelined single-cycle processor built from the same logic (clock period = sum of the five stage delays, CPI = 1).`;
     const solution = `**(A)**
 
-${fig(solPipe)}
+${fig(pipeFigure(rows, gray, w.arrows, start, len))}
 
 **(B)** One iteration takes **${w.period}** cycles: ${w.executed} instructions complete, ${w.stalls} cycle${w.stalls === 1 ? " is" : "s are"} lost to stalls, and ${w.annulled} to annulled instructions.
 
-**(C)** The slowest path is ${crit[0]}${crit[0] !== "IF" && (crit[0] === "DEC" || byp.has(crit[0])) ? " + BYP" : ""}: $t_{CLK} = ${tclk}$ ns. One iteration takes $${w.period} \\cdot ${tclk} = ${w.period * tclk}$ ns. CPI $= ${w.period}/${w.executed}$. Unpipelined: $t_{CLK} = ${single}$ ns and ${w.executed} instructions take $${w.executed} \\cdot ${single} = ${w.executed * single}$ ns.`;
+**(C)** The slowest path is ${crit}: $t_{CLK} = ${tclk}$ ns. One iteration takes $${w.period} \\cdot ${tclk} = ${w.period * tclk}$ ns. CPI $= ${w.period}/${w.executed}$. Unpipelined: $t_{CLK} = ${single}$ ns and ${w.executed} instructions take $${w.executed} \\cdot ${single} = ${w.executed * single}$ ns.`;
     return {
-      title: `Pipeline diagram: ${loop.name}`,
+      title: `Pipeline diagram: ${L.loop.name}, ${m.cfgPick.short}`,
       statement,
       grids: [{ id: "pipe", caption: "Pipeline diagram", rowLabels: STAGES, colLabels, answer: rows, given, gray, kind: "text", bypass: bypassAns }],
       parts: [
@@ -204,6 +292,118 @@ ${fig(solPipe)}
         { q: "Unpipelined time per iteration (ns)", answer: String(w.executed * single) },
       ],
       solution,
+    };
+  }
+
+  // Straight-line code from an empty pipeline, and the NOPs a compiler must add without interlocks.
+  function pipeStraightDrill(R) {
+    let m, prog, src, sim, last, tries = 0;
+    for (;;) {
+      m = pickMachine(R);
+      const n = m.bypass.length ? R.int(5, 7) : R.int(4, 5);
+      const { body } = genBody(R, n, R.pick(["a0", "s0", "t4"]));
+      src = body.join("\n");
+      prog = parseProgram(src);
+      sim = root.Sim6191.simulate(prog, simCfg(m, () => false), 60);
+      last = sim.rows.WB.findIndex((v, c) => c > 0 && v !== "NOP" && sim.rows.WB.slice(c + 1).every((x) => x === "NOP"));
+      if ((last + 1 <= 20 && sim.stalls.length) || ++tries > 30) break;
+    }
+    const len = last + 1;
+    const rows = STAGES.map((s) => sim.rows[s].slice(0, len));
+    const lastBusy = rows.map((row) => row.reduce((b, v, c) => (v !== "NOP" ? c : b), -1));
+    const gray = rows.map((row, r) => row.map((_, c) => c < r || c > lastBusy[r]));
+    const given = rows.map((row, r) => row.map((_, c) => r === 0 && c === 0));
+    const bypassAns = Array.from({ length: len }, (_, c) => sim.arrows.filter(([, , cc]) => cc === c).map(([s]) => s));
+    const nops = prog.map((_, i) => sim.stallSi.filter((x) => x === i).length);
+    const total = nops.reduce((a, b) => a + b, 0);
+    const statement = `**Straight-line code.** A processor has these features:
+
+${machineSpec(m, { control: false }).map((s) => "- " + s).join("\n")}
+
+The pipeline holds only NOPs before cycle 1. The first instruction is fetched in cycle 1.
+
+~~~
+${src}
+~~~
+
+**(A)** Fill in the pipeline diagram until the last instruction is in WB. Write NOP for a bubble. Gray cells hold NOPs before the code reaches the stage or after it leaves; they are not graded. In the **Bypass** row, write the stage(s) that bypass a value into DEC in that cycle.
+
+**(B)** Now remove the stall logic (no interlocks) but keep the same bypass paths. The compiler must insert NOPs so that the code still gets the right values. How many NOPs must go right before each instruction (as few as possible)?
+
+**(C)** In which cycle is the last instruction in WB, and how many stall cycles does the code have with interlocks?`;
+    const solution = `**(A)**
+
+${fig(pipeFigure(rows, gray, sim.arrows, 1, len))}
+
+**(B)** Each stall cycle of an instruction in DEC is one NOP the compiler must insert right before that instruction: a NOP delays the instruction by one cycle, exactly as a stall does.
+
+| Instruction | ${prog.map((p) => `[[${p.text}]]`).join(" | ")} |
+|---|${prog.map(() => "---").join("|")}|
+| NOPs before it | ${nops.join(" | ")} |
+
+**(C)** The last instruction is in WB in cycle ${len}. With interlocks the code stalls ${total} cycle${total === 1 ? "" : "s"}.`;
+    return {
+      title: `Straight-line pipeline: ${m.cfgPick.short}`,
+      statement,
+      grids: [
+        { id: "pipe", caption: "Pipeline diagram", rowLabels: STAGES, colLabels: rows[0].map((_, c) => String(c + 1)), answer: rows, given, gray, kind: "text", bypass: bypassAns },
+        { id: "nops", caption: "(B) NOPs right before each instruction", rowLabels: prog.map((p) => p.text), colLabels: ["NOPs"], answer: nops.map((x) => [String(x)]), kind: "value" },
+      ],
+      parts: [
+        { q: "(C) Cycle in which the last instruction is in WB", answer: String(len) },
+        { q: "(C) Stall cycles with interlocks", answer: String(total) },
+      ],
+      solution,
+    };
+  }
+
+  // The same loop on two processors: cycles per iteration, clock periods, and which is faster.
+  function pipeCompareDrill(R) {
+    const L = loopSetup(R);
+    let A, B, wA, wB, tries = 0;
+    do {
+      A = pickMachine(R); B = pickMachine(R, A);
+      wA = pipeWindow(L.prog, simCfg(A, L.taken), L.head, { iteration: 4 });
+      wB = pipeWindow(L.prog, simCfg(B, L.taken), L.head, { iteration: 4 });
+    } while (wA.period === wB.period && ++tries < 20);
+    const d = stageDelays(R);
+    const cA = clockOf(d, A.bypass), cB = clockOf(d, B.bypass);
+    const tA = wA.period * cA.tclk, tB = wB.period * cB.tclk;
+    const faster = tA < tB ? "A" : tB < tA ? "B" : "same";
+    const list = (m) => machineSpec(m).slice(0, 4).join(" ");
+    const statement = `**Comparing two processors.** This loop runs for many iterations. ${L.outcomeText}
+
+~~~
+${L.loop.src.trim()}
+~~~
+
+Processors A and B are built from the same stages, with delays ${delayText(d)}. A bypassed value goes through its source stage and then the bypass muxes in the same cycle. The bypass muxes are in DEC only if the processor has a bypass path. Registers are ideal.
+
+- **Processor A:** ${list(A)}
+- **Processor B:** ${list(B)}
+
+Draw the steady-state pipeline diagram for each processor on paper. Then give, for each processor, the cycles per iteration, the minimum clock period, and the time per iteration. Which processor runs the loop faster (A, B, or same)?`;
+    const solFor = (name, m, w, c) => {
+      const len = Math.min(w.len, 18);
+      const rows = STAGES.map((s) => w.rows[s].slice(0, len));
+      const gray = rows.map((_, r) => rows[r].map((_, cc) => cc < r));
+      return `**Processor ${name}** (${m.cfgPick.short}; branches in ${m.branchIn}, jumps in ${m.jalIn}, loads ready in ${m.loadReady}):
+
+${fig(pipeFigure(rows, gray, w.arrows, 100, len))}
+
+${w.period} cycles per iteration (${w.stalls} stall, ${w.annulled} annulled). $t_{CLK} = ${c.tclk}$ ns (${c.crit}). Time per iteration: $${w.period} \\cdot ${c.tclk} = ${w.period * c.tclk}$ ns.`;
+    };
+    return {
+      title: `Compare processors: ${L.loop.name}`,
+      statement,
+      grids: [],
+      parts: [
+        { q: "A: cycles per iteration", answer: String(wA.period) }, { q: "B: cycles per iteration", answer: String(wB.period) },
+        { q: "A: minimum clock period (ns)", answer: String(cA.tclk) }, { q: "B: minimum clock period (ns)", answer: String(cB.tclk) },
+        { q: "A: time per iteration (ns)", answer: String(tA) }, { q: "B: time per iteration (ns)", answer: String(tB) },
+        { q: "Faster processor (A, B, or same)", accept: faster === "same" ? ["same", "tie", "equal"] : [faster] },
+      ],
+      solution: `${solFor("A", A, wA, cA)}\n\n${solFor("B", B, wB, cB)}\n\n**Faster:** ${faster === "same" ? "neither; both take the same time" : `processor ${faster}`}.`,
     };
   }
 
@@ -473,16 +673,32 @@ AMAT $= ${hit} + (1 - ${hr[0]}/${hr[1]}) \\cdot ${pen} = ${amat}$. For AMAT ${hi
     const nodes = [], edges = [];
     layers.forEach((n, l) => { for (let i = 0; i < n; i++) nodes.push({ id: `n${l}_${i}`, l, i, d: R.int(1, 9) }); });
     const byL = (l) => nodes.filter((x) => x.l === l);
-    for (const v of nodes) {
-      if (v.l === 0) continue;
-      const prev = byL(v.l - 1);
-      const k = Math.min(prev.length, R.int(1, 2));
-      for (const u of R.shuffle(prev).slice(0, k)) edges.push([u.id, v.id]);
-      if (v.l >= 2 && R.chance(0.25)) edges.push([R.pick(byL(v.l - 2)).id, v.id]);
+    // Edges between neighboring layers form a monotone staircase from (top, top) to (bottom,
+    // bottom): every node gets an edge, and two edges never cross. A skip edge (layer l-2 to l)
+    // joins the two top nodes around the top of the drawing, or the two bottom nodes around the
+    // bottom, so it crosses nothing either.
+    // Edges also span at most 1.5 rows vertically, so no edge runs long past another box.
+    const rowY = (l, i) => i + (3 - layers[l]) / 2;
+    for (let l = 1; l < layers.length; l++) {
+      const A = byL(l - 1), B = byL(l);
+      let i = 0, j = 0;
+      edges.push([A[0].id, B[0].id]);
+      while (i < A.length - 1 || j < B.length - 1) {
+        const steps = [[i + 1, j], [i, j + 1], [i + 1, j + 1]].filter(([a, b]) => a < A.length && b < B.length);
+        const short = steps.filter(([a, b]) => Math.abs(rowY(l - 1, a) - rowY(l, b)) <= 1.5);
+        [i, j] = R.pick(short.length ? short : steps.slice(-1));
+        edges.push([A[i].id, B[j].id]);
+      }
     }
-    for (const u of nodes) if (u.l < layers.length - 1 && !edges.some((e) => e[0] === u.id)) edges.push([u.id, R.pick(byL(u.l + 1)).id]);
+    const skip = {};
+    if (R.chance(0.45)) {
+      const l = R.int(2, layers.length - 1), top = R.chance(0.5);
+      const a = top ? byL(l - 2)[0] : byL(l - 2).slice(-1)[0], b = top ? byL(l)[0] : byL(l).slice(-1)[0];
+      edges.push([a.id, b.id]);
+      skip[`${a.id}>${b.id}`] = top ? 10 : 225;
+    }
+    nodes.sort((u, v) => u.l - v.l || u.i - v.i);
     const inputs = byL(0).map((v, i) => [`@${"ABCD"[i]}`, v.id]);
-    if (R.chance(0.5)) inputs.push([`@${"ABCD"[inputs.length]}`, R.pick(byL(1)).id]);
     const outs = byL(layers.length - 1).map((v, i) => [v.id, `@${"XYZ"[i]}`]);
     const D = Object.fromEntries(nodes.map((v) => [v.id, v.d]));
     const preds = (id) => edges.filter((e) => e[1] === id).map((e) => e[0]);
@@ -511,16 +727,22 @@ AMAT $= ${hit} + (1 - ${hr[0]}/${hr[1]}) \\cdot ${pen} = ${amat}$. For AMAT ${hi
     const X = (l) => 110 + l * 100, Y = (l, i) => 40 + i * 70 + (3 - layers[l]) * 35;
     const gn = {};
     nodes.forEach((v) => { gn[v.id] = [X(v.l), Y(v.l, v.i), `${v.d} ns`]; });
-    inputs.forEach(([t, v], i) => { const n = nodes.find((x) => x.id === v); gn[t] = [n.l === 0 ? 30 : X(n.l) - 60, n.l === 0 ? Y(0, n.i) : Y(n.l, n.i) + 30, t.slice(1)]; });
+    inputs.forEach(([t, v]) => { const n = nodes.find((x) => x.id === v); gn[t] = [30, Y(0, n.i), t.slice(1)]; });
     outs.forEach(([v, t]) => { const n = nodes.find((x) => x.id === v); gn[t] = [X(n.l) + 80, Y(n.l, n.i), t.slice(1)]; });
     const allE = [...inputs.map(([a, b]) => `${a}>${b}`), ...edges.map(([a, b]) => `${a}>${b}`), ...outs.map(([a, b]) => `${a}>${b}`)];
+    const drawE = allE.map((e) => {
+      if (!(e in skip)) return e;
+      const [a, b] = e.split(">");
+      return [a, b, { via: [[gn[a][0], skip[e]], [gn[b][0], skip[e]]] }];
+    });
     const W = X(layers.length - 1) + 110, H = 40 + 3 * 70 + 10;
-    const draw = (regs) => F.svg(W, H, F.graph(gn, allE, { regs, rc: "acc" }));
-    const regsFor = ({ st, K }) => {
+    const draw = (regs) => F.svg(W, H, F.graph(gn, drawE, { regs, rc: "acc" }));
+    // kWant > K pads the pipeline with extra registers on the outputs (same period, more stages).
+    const regsFor = ({ st, K }, kWant = K) => {
       const r = {};
       for (const [a, b] of edges) if (st[b] - st[a] > 0) r[`${a}>${b}`] = st[b] - st[a];
       for (const [a, b] of inputs) if (st[b] - 1 > 0) r[`${a}>${b}`] = st[b] - 1;
-      for (const [a, b] of outs) r[`${a}>${b}`] = K - st[a] + 1;
+      for (const [a, b] of outs) r[`${a}>${b}`] = Math.max(K, kWant) - st[a] + 1;
       return r;
     };
     const statement = `**Pipelining a circuit.** Each component shows its propagation delay. Registers are ideal unless a part says otherwise, and every pipeline has a register on each output.
@@ -529,7 +751,7 @@ ${fig(draw({}))}
 
 **(A)** What are the latency and throughput of the combinational circuit (a 1-stage pipeline)?
 
-**(B)** Pipeline the circuit for maximum throughput. Give the latency and throughput.
+**(B)** Pipeline the circuit for maximum throughput, with the fewest stages for that throughput. Place the registers in the figure below the questions, and give the latency and throughput.
 
 **(C)** Give the latency and throughput of the best (maximum-throughput) **2-stage** pipeline${k3 === 3 ? ", and of the best **3-stage** pipeline" : ""}.
 
@@ -550,10 +772,41 @@ ${fig(draw(regsFor(best)))}
 
 **(C)** The smallest period that fits in 2 stages is ${P2} ns: latency ${2 * P2} ns, throughput $1/${P2}$.${k3 === 3 ? ` In 3 stages it is ${P3} ns: latency ${3 * P3} ns, throughput $1/${P3}$.` : ""}
 
-${fig(draw(regsFor(assign(P2))))}
+${fig(draw(regsFor(assign(P2), 2)))}
 
 **(D)** $t_{CLK} = ${P} + t_{PD} + t_{SETUP} = ${Pr}$ ns. Latency $${K} \\cdot ${Pr} = ${K * Pr}$ ns, throughput $1/${Pr}$.`;
-    return { title: "Pipelining a circuit (K-stage)", statement, grids: [], parts, solution };
+    // Interactive register placement (app.js draws it; evalPlacement grades it).
+    const order = [...inputs.map(([t]) => t), ...nodes.map((v) => v.id), ...outs.map(([, t]) => t)];
+    const targets = [{ label: "Maximum throughput (fewest stages)", K, P, regs: regsFor(best) },
+      { label: "Best 2-stage pipeline", K: 2, P: P2, regs: regsFor(assign(P2), 2) }];
+    if (k3 === 3) targets.push({ label: "Best 3-stage pipeline", K: 3, P: P3, regs: regsFor(assign(P3), 3) });
+    const place = { gn, edges: allE, drawEdges: drawE, W, H, order, delay: D, outs: outs.map(([, t]) => t), targets };
+    return { title: "Pipelining a circuit (K-stage)", statement, grids: [], parts, solution, place };
+  }
+
+  // Grades a register placement { "A>B": count } on a place object from dagDrill. A valid
+  // pipeline has the same number of registers on every input-to-output path and a register on
+  // each output. Returns { ok, K, P } or { ok: false, msg, bad: [node ids] }.
+  function evalPlacement(pl, regs) {
+    const E = pl.edges.map((s) => { const [a, b] = s.split(">"); return { a, b, k: regs[s] || 0 }; });
+    const c = {}, t = {};
+    for (const id of pl.order) {
+      const inc = E.filter((e) => e.b === id);
+      if (!inc.length) { c[id] = 0; t[id] = 0; continue; }
+      const cs = [...new Set(inc.map((e) => c[e.a] + e.k))].sort((x, y) => x - y);
+      if (cs.length > 1) {
+        const what = id[0] === "@" ? `output ${id.slice(1)}` : `the ${pl.delay[id]} ns component (red)`;
+        return { ok: false, bad: id[0] === "@" ? [] : [id], msg: `The paths into ${what} cross different numbers of registers (${cs.join(" and ")}). Their values would come from different inputs.` };
+      }
+      c[id] = cs[0];
+      t[id] = (pl.delay[id] || 0) + Math.max(0, ...inc.map((e) => (e.k ? 0 : t[e.a])));
+    }
+    const Ks = [...new Set(pl.outs.map((o) => c[o]))];
+    if (Ks.length > 1) return { ok: false, bad: [], msg: `The outputs have different numbers of registers (${Ks.join(" and ")}).` };
+    const bare = pl.outs.filter((o) => E.some((e) => e.b === o && !e.k));
+    if (bare.length) return { ok: false, bad: [], msg: `Output ${bare.map((o) => o.slice(1)).join(" and ")} has no register. In 6.191, every pipeline has a register on each output.` };
+    const P = Math.max(...Object.values(t));
+    return { ok: true, K: Ks[0], P };
   }
 
   // ---------------------------------------------------------------- control signals
@@ -750,6 +1003,369 @@ endmodule`;
       parts: [], solution: `When count reaches ${n}, [[result]] is valid for one cycle and the next cycle resets; inputs that arrive in that cycle are ignored.\n\n| Cycle | ${S.map((_, c) => c).join(" | ")} |\n|---|${S.map(() => "---").join("|")}|\n| in | ${ins.map((v) => (v === null ? "Inv" : `V(${v})`)).join(" | ")} |\n| sum | ${S.join(" | ")} |\n| count | ${Cn.join(" | ")} |\n| result | ${O.join(" | ")} |` };
   }
 
+  // ---------------------------------------------------------------- Minispec writing (fill in a template, like Fall 2025 P1)
+  // Code answers are compared after codeCanon: no spaces, lower case, number literals in decimal,
+  // and grouping parentheses removed (call parentheses such as isValid(x) and Bit#(4) stay).
+  function codeCanon(s) {
+    let t = String(s).trim().replace(/;\s*$/, "");
+    t = t.replace(/(\d*)'([bdh])([0-9a-f_]+)/gi, (_, w, b, d) => String(parseInt(d.replace(/_/g, ""), { b: 2, d: 10, h: 16 }[b.toLowerCase()])));
+    t = t.replace(/\b0x([0-9a-f]+)\b/gi, (_, d) => String(parseInt(d, 16))).replace(/\b0b([01]+)\b/gi, (_, d) => String(parseInt(d, 2)));
+    t = t.replace(/\s+/g, "").toLowerCase();
+    const out = [], st = [];
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (ch === "(") { const call = i > 0 && /[\w#]/.test(t[i - 1]); st.push(call); if (call) out.push(ch); }
+      else if (ch === ")") { if (st.pop()) out.push(ch); }
+      else out.push(ch);
+    }
+    return out.join("");
+  }
+  const either = (a, op, b) => [`${a} ${op} ${b}`, `${b} ${op} ${a}`];
+  const bitsFor = (n) => Math.max(1, Math.ceil(Math.log2(n)));
+  const randBits = (R, L) => { let p; do p = Array.from({ length: L }, () => R.int(0, 1)).join(""); while (/^(.)\1*$/.test(p)); return p; };
+  const ifThen = (cond, a, b, negCond) => [`(${cond}) ? ${a} : ${b}`, ...(negCond ? [`(${negCond}) ? ${b} : ${a}`] : [])];
+
+  // @name@ in the code is a blank; blanks[name] lists the accepted answers (the first is shown in the solution).
+  function fillTemplate(code, blanks) {
+    const order = [];
+    const stmt = code.replace(/@(\w+)@/g, (_, k) => { order.push(k); return `____(${order.length})____`; });
+    const sol = code.replace(/@(\w+)@/g, (_, k) => blanks[k][0]);
+    return { stmt, sol, parts: order.map((k, i) => ({ q: `Blank (${i + 1})`, accept: blanks[k], code: true })) };
+  }
+
+  const MSW = {
+    counter(R) {
+      let N; do N = R.int(5, 14); while ((N & (N - 1)) === 0);
+      const w = bitsFor(N), m = N - 1;
+      return { title: "Wrapping counter",
+        task: `Write a counter that counts 0, 1, ..., ${m}, 0, 1, ... It goes up by one in each cycle where the input [[en]] is True. It holds its value in the other cycles. The method [[wrap]] is True in a cycle where [[en]] is True and the count is ${m} (so the count goes back to 0 at the end of that cycle).`,
+        code: `module Counter;
+    Reg#(Bit#(${w})) count(0);
+    input Bool en default = False;
+
+    rule tick;
+        if (@en@) begin
+            count <= @next@;
+        end
+    endrule
+
+    method Bool wrap = @wrap@;
+endmodule`,
+        blanks: { en: ["en", "en == True"],
+          next: [...ifThen(`count == ${m}`, "0", "count + 1", `count != ${m}`), ...ifThen(`count < ${m}`, "count + 1", "0", `count >= ${m}`)],
+          wrap: [...either("en", "&&", `count == ${m}`), ...either("en", "&&", `${m} == count`)] },
+        why: `[[count]] has ${w} bits. ${m} + 1 = ${N} fits in ${w} bits, so the count does not go back to 0 by itself (${N} is not a power of 2). The mux selects 0 when the count is ${m}.` };
+    },
+
+    fsm(R) {
+      const L = R.int(3, 4), p = randBits(R, L);
+      const next = (k, b) => { const s = p.slice(0, k) + b; for (let len = Math.min(L, s.length); len >= 0; len--) if (s.endsWith(p.slice(0, len))) return len; return 0; };
+      const S = Array.from({ length: L + 1 }, (_, k) => `S${k}`);
+      const blanks = { found: [`state == S${L}`, `S${L} == state`] };
+      const rows = S.map((s, k) => { blanks[`t${k}a`] = [`S${next(k, "1")}`]; blanks[`t${k}b`] = [`S${next(k, "0")}`]; return `            ${s}: state <= (in == 1) ? @t${k}a@ : @t${k}b@;`; });
+      return { title: "Sequence detector FSM",
+        task: `Write a state machine that finds the input pattern ${p.split("").join(", ")} (oldest bit first) on the 1-bit input [[in]]. One bit arrives in each cycle. State S${"k"} means: the longest end of the inputs so far that matches the start of the pattern has k bits. The method [[found]] is True in the cycle after the last bit of the pattern arrives. Overlapping patterns count (after a match, the end of the match can be the start of the next one).`,
+        code: `typedef enum { ${S.join(", ")} } State;
+
+module Detect;
+    Reg#(State) state(S0);
+    input Bit#(1) in;
+
+    rule tick;
+        case (state)
+${rows.join("\n")}
+        endcase
+    endrule
+
+    method Bool found = @found@;
+endmodule`,
+        blanks,
+        why: `From state S${"k"} with input b, take the first k pattern bits followed by b, then find the longest end of that string that is also a start of the pattern ${p}. ${S.map((s, k) => `${s}: 1 → S${next(k, "1")}, 0 → S${next(k, "0")}`).join("; ")}.` };
+    },
+
+    shift(R) {
+      const L = R.int(4, 6), p = randBits(R, L), lsb = R.chance(0.5);
+      const stored = lsb ? p : p.split("").reverse().join("");
+      return { title: "Shift-register pattern detector",
+        task: `Write a module that remembers the last ${L} bits of the 1-bit input [[in]] in the register [[last]]. Each new bit enters at the ${lsb ? "least" : "most"} significant end of [[last]], and the oldest bit leaves at the other end. The method [[found]] is True when the last ${L} inputs, oldest first, were ${p.split("").join(", ")}. (Ignore the first ${L - 1} cycles after reset.)`,
+        code: `module Detect;
+    Reg#(Bit#(${L})) last(0);
+    input Bit#(1) in;
+
+    rule tick;
+        last <= @sh@;
+    endrule
+
+    method Bool found = @f@;
+endmodule`,
+        blanks: { sh: [lsb ? `{last[${L - 2}:0], in}` : `{in, last[${L - 1}:1]}`],
+          f: either("last", "==", `${L}'b${stored}`) },
+        why: lsb ? `The new bit goes in bit 0, so the oldest of the last ${L} bits is bit ${L - 1}. Read from the most significant bit, [[last]] holds the pattern in arrival order: ${L}'b${stored}.`
+          : `The new bit goes in bit ${L - 1}, so the oldest bit is bit 0. Read from the most significant bit, [[last]] holds the pattern in reverse arrival order: ${L}'b${stored}.` };
+    },
+
+    loopfn(R) {
+      const n = R.pick([4, 8, 16]), k = Math.log2(n) + 1;
+      const kind = R.pick(["parity", "popcount", "reverse", "allones", "hamming"]);
+      const F = {
+        parity: { name: "parity", ret: 1, args: `Bit#(${n}) x`, lhs: "r", init: ["0"], body: either("r", "^", "x[i]"),
+          task: `returns 1 if [[x]] has an odd number of 1 bits, and 0 otherwise`, why: "XOR of all the bits, starting from 0." },
+        popcount: { name: "countOnes", ret: k, args: `Bit#(${n}) x`, lhs: "r", init: ["0"], body: either("r", "+", "zeroExtend(x[i])"),
+          task: `returns the number of 1 bits in [[x]]`, why: `The result needs ${k} bits to hold ${n}. Each bit is zero-extended to ${k} bits before the add.` },
+        reverse: { name: "reverseBits", ret: n, args: `Bit#(${n}) x`, lhs: "r[i]", init: ["0"], body: [`x[${n - 1} - i]`],
+          task: `returns [[x]] with the order of its bits reversed (bit 0 goes to bit ${n - 1})`, why: `Bit i of the result is bit ${n - 1} − i of [[x]].` },
+        allones: { name: "allOnes", ret: 1, args: `Bit#(${n}) x`, lhs: "r", init: ["1"], body: either("r", "&", "x[i]"),
+          task: `returns 1 if every bit of [[x]] is 1, and 0 otherwise`, why: "AND of all the bits, starting from 1 (the identity of AND)." },
+        hamming: { name: "distance", ret: k, args: `Bit#(${n}) a, Bit#(${n}) b`, lhs: "r", init: ["0"],
+          body: [...either("r", "+", "zeroExtend(a[i] ^ b[i])"), ...either("r", "+", "zeroExtend(b[i] ^ a[i])")],
+          task: `returns the number of bit positions where [[a]] and [[b]] are different`, why: `a[i] ^ b[i] is 1 where the bits are different. Zero-extend it to ${k} bits and add.` },
+      }[kind];
+      return { title: "Combinational function with a loop",
+        task: `Write the function [[${F.name}]], which ${F.task}. Use the for loop.`,
+        code: `function Bit#(${F.ret}) ${F.name}(${F.args});
+    Bit#(${F.ret}) r = @init@;
+    for (Integer i = 0; i < @bound@; i = i + 1) begin
+        ${F.lhs} = @body@;
+    end
+    return r;
+endfunction`,
+        blanks: { init: F.init, bound: [String(n)], body: F.body },
+        why: `${F.why} The loop has a constant bound, so the compiler unrolls it into ${n} copies of the loop body.` };
+    },
+
+    alu(R) {
+      const w = R.pick([8, 16]), h = w / 2;
+      const OPS = [
+        ["a + b", either("a", "+", "b")],
+        ["a − b", ["a - b"]],
+        ["the bitwise AND of a and b", either("a", "&", "b")],
+        ["the bitwise OR of a and b", either("a", "|", "b")],
+        ["the bitwise XOR of a and b", either("a", "^", "b")],
+        ["the bitwise NOT of a", ["~a"]],
+        ["a shifted left by 1 (a 0 enters at bit 0)", ["a << 1", `{a[${w - 2}:0], 1'b0}`]],
+        ["a shifted right by 1 (a 0 enters at the top)", ["a >> 1", `{1'b0, a[${w - 1}:1]}`]],
+        ["the larger of a and b (unsigned)", [...ifThen("a > b", "a", "b", "a <= b"), ...ifThen("a >= b", "a", "b", "a < b"), ...ifThen("b > a", "b", "a", "b <= a"), ...ifThen("b < a", "a", "b")]],
+        ["the smaller of a and b (unsigned)", [...ifThen("a < b", "a", "b", "a >= b"), ...ifThen("a <= b", "a", "b", "a > b"), ...ifThen("b < a", "b", "a", "b >= a"), ...ifThen("b > a", "a", "b")]],
+        [`the low ${h} bits of a, then the low ${h} bits of b (a in the upper half)`, [`{a[${h - 1}:0], b[${h - 1}:0]}`]],
+        ["1 if a equals b, else 0", [...ifThen("a == b", "1", "0", "a != b"), ...ifThen("b == a", "1", "0")]],
+        ["the low 4 bits of a, sign-extended", ["signExtend(a[3:0])"]],
+        ["the low 4 bits of a, zero-extended", ["zeroExtend(a[3:0])", `{${w - 4}'b0, a[3:0]}`]],
+      ];
+      const ops = R.shuffle(OPS).slice(0, 4);
+      const blanks = {};
+      ops.forEach(([, acc], i) => { blanks[`o${i}`] = acc; });
+      return { title: "ALU with a case statement",
+        task: `Write the function [[alu]]. The 2-bit [[op]] selects the result:\n\n| op | Result |\n|---|---|\n${ops.map(([d], i) => `| ${i} | ${d} |`).join("\n")}`,
+        code: `function Bit#(${w}) alu(Bit#(${w}) a, Bit#(${w}) b, Bit#(2) op);
+    Bit#(${w}) r = 0;
+    case (op)
+${ops.map((_, i) => `        ${i}: r = @o${i}@;`).join("\n")}
+    endcase
+    return r;
+endfunction`,
+        blanks, why: "Each case assigns one expression of the full width. A bit slice with a concatenation or an extend keeps the width correct." };
+    },
+
+    serial(R) {
+      const W = R.pick([4, 6, 8]), lsb = R.chance(0.6), k = bitsFor(W);
+      return { title: "Serial transmitter",
+        task: `Write a transmitter like the UART in Fall 2025. The line [[tx]] is 1 when idle. When [[in]] is valid in the [[Idle]] state, the module saves the data and sends a start bit 0. Then it sends the ${W} data bits, ${lsb ? "least" : "most"} significant bit first, then a stop bit 1, and then it goes back to [[Idle]]. Each bit is on the line for exactly one cycle. The module ignores [[in]] when it is not in [[Idle]].`,
+        code: `typedef enum { Idle, Sending, Stop } TxState;
+
+module Transmit;
+    Reg#(Bit#(${W})) data;
+    Reg#(TxState) state(Idle);
+    Reg#(Bit#(1)) tx(1);
+    Reg#(Bit#(${k})) idx;
+    input Maybe#(Bit#(${W})) in default = Invalid;
+
+    rule tick;
+        case (state)
+            Idle: if (@v@) begin
+                data <= @d@;
+                tx <= @start@;
+                idx <= @i0@;
+                state <= Sending;
+            end
+            Sending: begin
+                tx <= data[idx];
+                if (idx == @last@) state <= Stop;
+                idx <= @inc@;
+            end
+            Stop: begin
+                tx <= @stop@;
+                state <= @back@;
+            end
+        endcase
+    endrule
+
+    method Bit#(1) txWire = @out@;
+endmodule`,
+        blanks: { v: ["isValid(in)"], d: ["fromMaybe(?, in)"], start: ["0"], i0: [lsb ? "0" : String(W - 1)],
+          last: [lsb ? String(W - 1) : "0"], inc: [lsb ? "idx + 1" : "idx - 1", lsb ? "1 + idx" : "idx + " + ((1 << k) - 1)],
+          stop: ["1"], back: ["Idle"], out: ["tx"] },
+        why: `A register write shows on the line one cycle later. The start bit goes out in the cycle after [[in]] is valid. The ${W} [[Sending]] cycles put bits ${lsb ? `0 to ${W - 1}` : `${W - 1} down to 0`} on the line, and the [[Stop]] state puts the stop bit 1 on the line. [[tx]] keeps 1 in [[Idle]] because no rule writes it there.` };
+    },
+
+    iter(R) {
+      const kind = R.pick(["sum", "ones", "mult", "gcd"]);
+      const pair = `typedef struct { Bit#(16) a; Bit#(16) b; } Pair;\n\n`;
+      const V = {
+        sum: { title: "Sum from 1 to n", task: "When [[in]] is Valid(n), compute 1 + 2 + ... + n with one addition in each cycle. [[result]] is Invalid while the module works and Valid(sum) when it is done. A new valid input starts a new computation.",
+          code: `module SumTo;
+    Reg#(Bit#(16)) i(0);
+    Reg#(Bit#(16)) sum(0);
+    input Maybe#(Bit#(16)) in default = Invalid;
+
+    rule tick;
+        if (@v@) begin
+            i <= @load@;
+            sum <= @zero@;
+        end else if (@cond@) begin
+            sum <= @acc@;
+            i <= @dec@;
+        end
+    endrule
+
+    method Maybe#(Bit#(16)) result = @res@;
+endmodule`,
+          blanks: { v: ["isValid(in)"], load: ["fromMaybe(?, in)"], zero: ["0"], cond: ["i != 0", "i > 0", "0 != i", "0 < i"],
+            acc: either("sum", "+", "i"), dec: ["i - 1"], res: ifThen("i == 0", "Valid(sum)", "Invalid", "i != 0") },
+          why: "The counter [[i]] goes from n down to 0. Each cycle adds the old [[i]] to [[sum]]. Both writes use the values from the start of the cycle." },
+        ones: { title: "Count ones, one bit per cycle", task: "When [[in]] is Valid(x), count the 1 bits of x, one bit in each cycle: look at bit 0 and shift right. Stop when no 1 bits are left. [[result]] is Invalid while the module works and Valid(count) when it is done. A new valid input starts a new count.",
+          code: `module CountOnes;
+    Reg#(Bit#(16)) x(0);
+    Reg#(Bit#(5)) count(0);
+    input Maybe#(Bit#(16)) in default = Invalid;
+
+    rule tick;
+        if (@v@) begin
+            x <= @load@;
+            count <= @zero@;
+        end else if (@cond@) begin
+            count <= @acc@;
+            x <= @dec@;
+        end
+    endrule
+
+    method Maybe#(Bit#(5)) result = @res@;
+endmodule`,
+          blanks: { v: ["isValid(in)"], load: ["fromMaybe(?, in)"], zero: ["0"], cond: ["x != 0", "x > 0", "0 != x", "0 < x"],
+            acc: either("count", "+", "zeroExtend(x[0])"), dec: ["x >> 1", "{1'b0, x[15:1]}"], res: ifThen("x == 0", "Valid(count)", "Invalid", "x != 0") },
+          why: "Bit 0 is zero-extended to 5 bits before the add. The loop stops as soon as x is 0, so it can take fewer than 16 cycles." },
+        mult: { title: "Multiply by repeated addition", task: "When [[in]] is Valid(p), compute p.a × p.b by adding p.a to an accumulator p.b times, one addition in each cycle. [[result]] is Invalid while the module works and Valid(product) when it is done. A new valid input starts a new computation.",
+          code: `${pair}module Multiply;
+    Reg#(Bit#(16)) a(0);
+    Reg#(Bit#(16)) b(0);
+    Reg#(Bit#(16)) acc(0);
+    input Maybe#(Pair) in default = Invalid;
+
+    rule tick;
+        if (@v@) begin
+            let p = @load@;
+            a <= @la@;
+            b <= @lb@;
+            acc <= 0;
+        end else if (@cond@) begin
+            acc <= @acc@;
+            b <= @dec@;
+        end
+    endrule
+
+    method Maybe#(Bit#(16)) result = @res@;
+endmodule`,
+          blanks: { v: ["isValid(in)"], load: ["fromMaybe(?, in)"], la: ["p.a"], lb: ["p.b"], cond: ["b != 0", "b > 0", "0 != b", "0 < b"],
+            acc: either("acc", "+", "a"), dec: ["b - 1"], res: ifThen("b == 0", "Valid(acc)", "Invalid", "b != 0") },
+          why: "[[let]] names the struct inside the Maybe. [[b]] counts the additions that are left." },
+        gcd: { title: "GCD by subtraction", task: "When [[in]] is Valid(p), compute the greatest common divisor of p.a and p.b (both are not 0). In each cycle, subtract the smaller value from the larger one. Stop when the two values are equal. [[result]] is Invalid while the module works and Valid(gcd) when it is done. A new valid input starts a new computation.",
+          code: `${pair}module GCD;
+    Reg#(Bit#(16)) x(1);
+    Reg#(Bit#(16)) y(1);
+    input Maybe#(Pair) in default = Invalid;
+
+    rule tick;
+        if (@v@) begin
+            let p = @load@;
+            x <= @la@;
+            y <= @lb@;
+        end else if (@c1@) begin
+            x <= @sx@;
+        end else if (@c2@) begin
+            y <= @sy@;
+        end
+    endrule
+
+    method Maybe#(Bit#(16)) result = @res@;
+endmodule`,
+          blanks: { v: ["isValid(in)"], load: ["fromMaybe(?, in)"], la: ["p.a"], lb: ["p.b"], c1: ["x > y", "y < x"], sx: ["x - y"],
+            c2: ["y > x", "x < y"], sy: ["y - x"], res: [...ifThen("x == y", "Valid(x)", "Invalid", "x != y"), ...ifThen("x == y", "Valid(y)", "Invalid", "x != y"), ...ifThen("y == x", "Valid(x)", "Invalid")] },
+          why: "gcd(x, y) = gcd(x − y, y) when x > y. When x = y, that value is the GCD. If x = y, neither branch runs, so the registers hold." },
+      }[kind];
+      return { ...V, title: V.title };
+    },
+
+    tracker(R) {
+      const kind = R.pick(["max", "min", "count"]), T = R.int(20, 200);
+      const V = {
+        max: { title: "Running maximum", task: "[[best]] holds the largest valid input since the last clear. After reset or a clear, [[best]] is 0. If [[clear]] is True in a cycle, the module ignores [[in]] in that cycle.",
+          init: "0", blanks: { init2: ["0"], v: ["isValid(in)"], cmp: ["v > best", "best < v"], upd: ["v"] } },
+        min: { title: "Running minimum", task: "[[best]] holds the smallest valid input since the last clear. After reset or a clear, [[best]] is 255 (the largest 8-bit value). If [[clear]] is True in a cycle, the module ignores [[in]] in that cycle.",
+          init: "255", blanks: { init2: ["255", "8'hFF", "~0"], v: ["isValid(in)"], cmp: ["v < best", "best > v"], upd: ["v"] } },
+        count: { title: "Count large inputs", task: `[[best]] counts the valid inputs greater than ${T} since the last clear. After reset or a clear, it is 0. If [[clear]] is True in a cycle, the module ignores [[in]] in that cycle.`,
+          init: "0", blanks: { init2: ["0"], v: ["isValid(in)"], cmp: [`v > ${T}`, `${T} < v`, `v >= ${T + 1}`], upd: either("best", "+", "1") } },
+      }[kind];
+      return { title: V.title, task: V.task,
+        code: `module Tracker;
+    Reg#(Bit#(8)) best(${V.init});
+    input Maybe#(Bit#(8)) in default = Invalid;
+    input Bool clear default = False;
+
+    rule tick;
+        if (clear) begin
+            best <= @init2@;
+        end else if (@v@) begin
+            let v = fromMaybe(?, in);
+            if (@cmp@) best <= @upd@;
+        end
+    endrule
+
+    method Bit#(8) value = best;
+endmodule`,
+        blanks: V.blanks, why: "The [[if (clear)]] branch comes first, so a clear wins over a valid input in the same cycle." };
+    },
+
+    param(R) {
+      const kind = R.pick(["rotl", "rotr", "swap", "vsum", "vor"]);
+      const one = (name, ret, desc, ans, why) => ({ title: "Parametric function", task: `Write the parametric function [[${name}]], which ${desc}. It must work for any width n ≥ 2${name === "swapHalves" ? " (n even)" : ""}.`,
+        code: `function ${ret} ${name}#(Integer n)(Bit#(n) x);
+    return @e@;
+endfunction`, blanks: { e: ans }, why });
+      if (kind === "rotl") return one("rotl", "Bit#(n)", "rotates [[x]] left by one bit (the top bit moves to bit 0)", ["{x[n-2:0], x[n-1]}"], "The low n − 1 bits move up, and bit n − 1 goes to the bottom.");
+      if (kind === "rotr") return one("rotr", "Bit#(n)", "rotates [[x]] right by one bit (bit 0 moves to the top)", ["{x[0], x[n-1:1]}"], "Bit 0 goes to the top, and the high n − 1 bits move down.");
+      if (kind === "swap") return one("swapHalves", "Bit#(n)", "swaps the upper and lower halves of [[x]]", ["{x[n/2-1:0], x[n-1:n/2]}"], "The lower half becomes the upper half. Integer arithmetic such as n/2 is done at compile time.");
+      const or = kind === "vor";
+      return { title: "Parametric function over a Vector",
+        task: `Write the parametric function [[${or ? "anyOf" : "vsum"}]], which returns the ${or ? "bitwise OR" : "sum (wrapping in w bits)"} of the n elements of [[v]].`,
+        code: `function Bit#(w) ${or ? "anyOf" : "vsum"}#(Integer n, Integer w)(Vector#(n, Bit#(w)) v);
+    Bit#(w) s = @init@;
+    for (Integer i = 0; i < @bound@; i = i + 1) begin
+        s = @body@;
+    end
+    return s;
+endfunction`,
+        blanks: { init: ["0"], bound: ["n"], body: either("s", or ? "|" : "+", "v[i]") },
+        why: `The loop bound is the Integer parameter n, so the loop unrolls for each n that is used. 0 is the identity of ${or ? "OR" : "addition"}.` };
+    },
+  };
+
+  function msWriteDrill(R) {
+    const t = MSW[R.pick(Object.keys(MSW))](R);
+    const f = fillTemplate(t.code, t.blanks);
+    return { title: `Minispec writing: ${t.title}`,
+      statement: `**${t.title}.** ${t.task}\n\nFill in each numbered blank with one expression. Spaces, extra parentheses, and the base of number literals do not matter. Some blanks have other correct answers than the ones the checker knows. If the checker marks your answer wrong, compare it with the solution.\n\n~~~\n${f.stmt}\n~~~`,
+      grids: [], parts: f.parts, solution: `${t.why}\n\n~~~\n${f.sol}\n~~~` };
+  }
+
   // ---------------------------------------------------------------- area and delay scaling
   const SCALE = [
     ["An n-bit ripple-carry adder", "n", "n"],
@@ -805,7 +1421,9 @@ The whole system uses one clock. If M1 and M2 have different numbers of stages, 
   }
 
   const DRILLS = {
-    pipeline: { name: "Pipeline diagrams", blurb: "Fill in a 5-stage pipeline diagram for a loop, under random bypass, branch, jump, and load-timing rules; then CPI, stalls, annulments, clock period, and the unpipelined comparison.", gen: pipelineDrill },
+    pipeline: { name: "Pipeline diagrams", blurb: "Fill in a 5-stage pipeline diagram for a past-quiz loop or a randomly generated loop, under random bypass, branch, jump, and load-timing rules; then CPI, stalls, annulments, clock period, and the unpipelined comparison.", gen: pipelineDrill },
+    pipestraight: { name: "Straight-line pipelines", blurb: "Fill in a diagram for random code from an empty pipeline, then count the NOPs a compiler must insert when there is no stall logic.", gen: pipeStraightDrill },
+    pipecompare: { name: "Compare two processors", blurb: "The same loop on two processors with different bypass paths and branch timing: cycles per iteration, clock period, and which is faster.", gen: pipeCompareDrill },
     cachetrace: { name: "Cache traces", blurb: "Run a short program (with byte and halfword stores) through a direct-mapped, set-associative, or fully associative cache, unified or split; fill in the final cache and count hits, misses, and write-backs.", gen: cacheTraceDrill },
     cacheloop: { name: "Cache performance of loops", blurb: "Instruction and data hit ratios for array loops on unified or split caches of different shapes.", gen: cacheLoopDrill },
     cachegeom: { name: "Cache geometry and AMAT", blurb: "Address bit fields, bits per line, AMAT, and the hit ratio for a target AMAT.", gen: cacheGeometryDrill },
@@ -814,9 +1432,10 @@ The whole system uses one clock. If M1 and M2 have different numbers of stages, 
     control: { name: "Decoder outputs", blurb: "Control signals for RISC-V instructions in the lecture single-cycle datapath.", gen: controlDrill },
     roles: { name: "Pipeline and cache facts", blurb: "What each stage does, hazards, stalls, annulment, and cache vocabulary.", gen: rolesDrill },
     minispec: { name: "Minispec over cycles", blurb: "Track FSM states, registers, and Maybe values cycle by cycle.", gen: minispecDrill },
+    mswrite: { name: "Minispec writing", blurb: "Fill in the blanks of a Minispec template (like Fall 2025 P1): counters, FSMs, shift registers, loops, case statements, a serial transmitter, iterative modules, Maybe inputs, and parametric functions.", gen: msWriteDrill },
     scaling: { name: "Area and delay scaling", blurb: "Θ() area and delay of common circuits and Minispec patterns.", gen: scalingDrill },
   };
   function generate(type, seed) { figSeq = 0; return Object.assign({ type, seed }, DRILLS[type].gen(rng(seed))); }
 
-  root.Drills6191 = { DRILLS, generate, canon, rng, _runProgram: runProgram };
+  root.Drills6191 = { DRILLS, generate, canon, codeCanon, evalPlacement, rng, _runProgram: runProgram };
 })(typeof window !== "undefined" ? window : globalThis);

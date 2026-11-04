@@ -1093,6 +1093,7 @@
           <div class="card kpi"><div class="v">${fmtDur(totalTime)}</div><div class="l">Total practice time</div></div>
           <div class="card kpi"><div class="v">${viewed}</div><div class="l">Solutions viewed</div></div>
         </div>
+        ${hasDrills() ? drillStatsHtml() : ""}
         <div class="card"><h3>Hardest problems you tried</h3>${hardest
           ? `<div class="table-wrap"><table class="topic-table hard-table"><thead><tr><th>Problem</th><th>Level</th><th>Status</th><th>Tries</th><th>Time</th><th>Hints</th><th>Solution</th></tr></thead><tbody>${hardest}</tbody></table></div>
             <p class="muted small">Ranked by a score: 1 for each wrong try, opened hint, and 5 minutes of active time; 3 for an opened solution; 2 if the problem is still open.</p>`
@@ -1103,11 +1104,11 @@
           <div class="card"><h3>Activity (last 16 weeks)</h3><div class="heat">${days.join("")}</div></div>
         </div>
         <div class="stats-grid two-col">
-          <div class="card"><h3>By topic</h3><table class="topic-table" style="width:100%;border-collapse:collapse">${topicRows}</table></div>
+          <div class="card"><h3>By topic</h3><table class="topic-table" id="topicTable" style="width:100%;border-collapse:collapse">${topicRows}</table></div>
           <div class="card"><h3>Recent submissions</h3>${recent}</div>
         </div>
       </div>`;
-    $("#app").querySelector(".topic-table").onclick = (e) => {
+    $("#topicTable").onclick = (e) => {
       const t = e.target.dataset.topic;
       if (!t) return;
       e.preventDefault();
@@ -1122,7 +1123,9 @@
   const hasDrills = () => !!DR && COURSE.code === "6.191";
   const drillRec = (type) => {
     store.drills = store.drills || {};
-    return (store.drills[type] = store.drills[type] || { tries: 0, solved: 0, time: 0, seen: [] });
+    const r = (store.drills[type] = store.drills[type] || { tries: 0, solved: 0, time: 0, seen: [] });
+    r.log = r.log || []; // one entry per attempt: {seed, t, checks, right, total, best, solved, firstOk, sol, time}
+    return r;
   };
   const newSeed = () => 1 + Math.floor(Math.random() * 1e6);
 
@@ -1138,6 +1141,7 @@
   const DONT_CARE = new Set(["?", "x", "-", "dc", "don't care", "dont care"]);
   function gradePart(q, s) {
     if (q.dontCare) return DONT_CARE.has(normTxt(s)) ? "correct" : "wrong";
+    if (q.code) return q.accept.some((a) => DR.codeCanon(s) === DR.codeCanon(a)) ? "correct" : "wrong";
     if (q.accept) {
       const c = q.canon ? DR.canon : (x) => x;
       return q.accept.some((a) => (q.canon ? c(s) === c(a) : sameTxt(s, a))) ? "correct" : "wrong";
@@ -1151,6 +1155,53 @@
     const want = g.answer[r][c];
     if (g.kind === "value") return want === "" ? s.trim() === "" : s.trim() !== "" && sameTxt(s, want);
     return s.trim() !== "" && sameTxt(s.replace(/^bubble$/i, "NOP"), want);
+  }
+
+  // Progress-page section for drills. Attempts before the per-attempt log existed count only in
+  // the "Attempts" and "Fully correct" columns.
+  function drillStatsHtml() {
+    const pct = (x) => (x === null ? "—" : `${Math.round(100 * x)}%`);
+    const types = Object.entries(DR.DRILLS).map(([type, d]) => ({ type, d, s: drillRec(type) }));
+    const logs = types.flatMap((x) => x.s.log.map((e) => ({ ...e, type: x.type, name: x.d.name })));
+    const tries = types.reduce((a, x) => a + x.s.tries, 0);
+    const solved = types.reduce((a, x) => a + x.s.solved, 0);
+    const checked = logs.filter((e) => e.checks);
+    const firstOk = logs.filter((e) => e.firstOk).length;
+    const time = logs.reduce((a, e) => a + (e.time || 0), 0);
+    const solveTimes = logs.filter((e) => e.solved && e.time).map((e) => e.time);
+
+    const rows = types.map(({ type, d, s }) => {
+      const L = s.log, C = L.filter((e) => e.checks);
+      const tm = mean(L.filter((e) => e.solved && e.time).map((e) => e.time));
+      const last = L.length ? L[L.length - 1].t : null;
+      return `<tr><td><a href="#/drill/${type}/${newSeed()}">${esc(d.name)}</a></td>
+        <td>${s.tries || "—"}</td><td>${s.tries ? s.solved : "—"}</td>
+        <td>${pct(mean(C.map((e) => e.best)))}</td>
+        <td>${C.length ? L.filter((e) => e.firstOk).length : "—"}</td>
+        <td>${tm === null ? "—" : fmtDur(tm)}</td>
+        <td>${L.filter((e) => e.sol).length || ""}</td>
+        <td>${last ? timeAgo(last) : ""}</td></tr>`;
+    }).join("");
+
+    const recent = logs.sort((a, b) => b.t - a.t).slice(0, 12).map((e) => {
+      const cls = e.solved ? "ok" : e.checks ? "cl" : "bad";
+      const label = e.solved ? (e.firstOk ? "First try" : "Solved") : e.checks ? `${e.right}/${e.total}` : "Solution only";
+      return `<div class="sub-row"><span class="${cls}">${label}</span>
+        <a href="#/drill/${e.type}/${e.seed}">${esc(e.name)} · seed ${e.seed}</a><time>${timeAgo(e.t)}</time></div>`;
+    }).join("") || `<p class="muted">No drill attempts yet.</p>`;
+
+    return `
+      <div class="card"><h3>Drills</h3>
+        <div class="stats-grid">
+          <div class="card kpi"><div class="v">${solved}<span class="muted"> / ${tries}</span></div><div class="l">Drills fully correct / attempted</div></div>
+          <div class="card kpi"><div class="v">${pct(mean(checked.map((e) => e.best)))}</div><div class="l">Average best score (answers right per attempt)</div></div>
+          <div class="card kpi"><div class="v">${firstOk}</div><div class="l">Correct on the first check, without the solution</div></div>
+          <div class="card kpi"><div class="v">${solveTimes.length ? fmtDur(mean(solveTimes)) : "—"}</div><div class="l">Average time to solve (${fmtDur(time)} over all solved drills)</div></div>
+        </div>
+        <div class="table-wrap"><table class="topic-table hard-table"><thead><tr><th>Drill</th><th>Attempts</th><th>Fully correct</th><th>Avg best score</th><th>First try</th><th>Avg time</th><th>Solutions</th><th>Last</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="muted small">An attempt is one generated problem that you checked or whose solution you opened. The best score is the highest fraction of right answers over your checks of that problem. Click a drill name for a new problem.</p>
+        <h3>Recent drills</h3>${recent}
+      </div>`;
   }
 
   function renderDrills() {
@@ -1172,7 +1223,17 @@
     const p = DR.generate(type, seed);
     const s = drillRec(type);
     const t0 = Date.now();
-    let counted = false, solvedOnce = false;
+    let counted = false, solvedOnce = false, entry = null;
+    const plRegs = {}; // register placement { "A>B": count } (Pipelining circuits drill)
+    let gradePlace = null;
+    const logEntry = () => {
+      if (!entry) {
+        entry = { seed, t: Date.now(), checks: 0, right: 0, total: 0, best: 0, solved: false, firstOk: false, sol: false, time: 0 };
+        s.log.push(entry);
+        if (s.log.length > 300) s.log.splice(0, s.log.length - 300);
+      }
+      return entry;
+    };
     const gridHtml = (g) => {
       const bypass = g.bypass ? `<tr class="byp-row"><th>Bypass</th>${g.bypass.map((_, c) =>
         `<td><input class="cell" data-g="${g.id}" data-r="byp" data-c="${c}" autocomplete="off" spellcheck="false" /></td>`).join("")}</tr>` : "";
@@ -1194,6 +1255,13 @@
       <section class="card">
         <h1>${esc(p.title)}</h1>
         <div class="statement">${paras(p.statement)}</div>
+        ${p.place ? `<div class="place">
+          <h3>(B) Place the registers</h3>
+          <p class="muted small">Click an edge to add a pipeline register. Shift-click or right-click an edge to remove one. The Check button grades the placement with your other answers.</p>
+          <div class="place-bar"><button class="btn ghost" id="plClear">Clear</button></div>
+          <div class="place-fig" id="plFig"></div>
+          <div id="plVerdict"></div>
+        </div>` : ""}
         ${p.grids.map(gridHtml).join("")}
         ${p.parts.length ? `<div class="parts">${p.parts.map((q, i) => `<div class="part-row" data-part="${i}">
           <label for="dp${i}">${inlineCode(q.q)}</label>
@@ -1245,15 +1313,50 @@
         row.classList.toggle("ok", res === "correct"); row.classList.toggle("bad", res !== "correct");
         row.querySelector(".part-mark").textContent = res === "correct" ? "✓" : res === "close" ? "≈" : "✗";
       });
+      if (gradePlace) { total++; if (gradePlace()) right++; }
       if (!counted) { s.tries++; counted = true; }
       const all = right === total;
       if (all && !solvedOnce) { solvedOnce = true; s.solved++; s.time += Date.now() - t0; }
+      const e = logEntry();
+      e.checks++; e.right = right; e.total = total; e.t = Date.now();
+      e.best = Math.max(e.best, total ? right / total : 0);
+      if (all && !e.solved) { e.solved = true; e.time = Date.now() - t0; e.firstOk = e.checks === 1 && !e.sol; }
       save();
       $("#verdict").innerHTML = all
         ? `<div class="verdict correct">All correct<span class="sub">${total} answers. Press “New problem” for another one.</span></div>`
         : `<div class="verdict ${right ? "close" : "wrong"}">${right} of ${total} correct<span class="sub">Red cells are wrong${empty ? `; ${empty} still empty` : ""}.</span></div>`;
     };
     $("#dCheck").onclick = check;
+
+    if (p.place) {
+      const pl = p.place;
+      const draw = (bad) => { $("#plFig").innerHTML = Fig.svg(pl.W, pl.H, Fig.graph(pl.gn, pl.drawEdges, { regs: plRegs, rc: "acc", hit: true, bad })); };
+      const edit = (e, d) => {
+        const hit = e.target.closest && e.target.closest(".hit");
+        if (!hit) return;
+        e.preventDefault(); e.stopPropagation();
+        const k = hit.dataset.e, v = Math.max(0, (plRegs[k] || 0) + d);
+        if (v) plRegs[k] = v; else delete plRegs[k];
+        $("#plVerdict").innerHTML = "";
+        draw();
+      };
+      $("#plFig").addEventListener("click", (e) => edit(e, e.shiftKey ? -1 : 1));
+      $("#plFig").addEventListener("contextmenu", (e) => edit(e, -1));
+      $("#plClear").onclick = () => { for (const k in plRegs) delete plRegs[k]; $("#plVerdict").innerHTML = ""; draw(); };
+      // Called by check(): grades the placement against the maximum-throughput target.
+      gradePlace = () => {
+        const r = DR.evalPlacement(pl, plRegs), g = pl.targets[0];
+        let msg = "";
+        if (!r.ok) msg = r.msg;
+        else if (r.P > g.P) msg = `Your placement gives a ${r.P} ns clock period. A shorter period is possible.`;
+        else if (r.K > g.K) msg = `Your placement has ${r.K} stages. Fewer stages give the same period.`;
+        draw(r.ok ? undefined : r.bad);
+        $("#plVerdict").innerHTML = msg ? `<div class="verdict wrong">Placement not correct<span class="sub">${esc(msg)}</span></div>`
+          : `<div class="verdict correct">Placement correct<span class="sub">${r.K} stages, period ${r.P} ns.</span></div>`;
+        return !msg;
+      };
+      draw();
+    }
     $("#app").querySelector(".drill").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target.matches("input")) { e.preventDefault(); check(); }
     });
@@ -1261,7 +1364,7 @@
       const box = $("#dSolBox");
       box.hidden = !box.hidden;
       $("#dSol").textContent = box.hidden ? "Show solution" : "Hide solution";
-      if (!box.hidden) { if (!counted) { s.tries++; counted = true; save(); } typeset(box); box.scrollIntoView({ block: "start", behavior: "smooth" }); }
+      if (!box.hidden) { if (!counted) { s.tries++; counted = true; } logEntry().sol = true; save(); typeset(box); box.scrollIntoView({ block: "start", behavior: "smooth" }); }
     };
     typeset($("#app"));
   }
@@ -1312,7 +1415,7 @@
     const zoom = $(".fig-zoom");
     if (zoom) { zoom.remove(); return; }
     const fig = e.target.closest && e.target.closest("svg.fig");
-    if (!fig) return;
+    if (!fig || fig.closest(".place-fig")) return;
     const el = document.createElement("div");
     el.className = "fig-zoom";
     el.innerHTML = fig.outerHTML;
