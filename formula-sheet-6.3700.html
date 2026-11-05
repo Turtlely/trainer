@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>6.3700 Quiz 2 Formula Sheet</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+<style>
+  @page { size: A4; margin: 10mm; }
+  :root { --ink: #111; --mut: #666; --rule: #bbb; --head: #8a3b00; }
+  html { background: #fff; }
+  body { margin: 0 auto; max-width: 190mm; color: var(--ink); font: 9.6pt/1.4 "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 10px; background: #fff; }
+  h1 { font-size: 12pt; margin: 0 0 4px; }
+  h1 small { font-weight: 400; font-size: 8.5pt; color: var(--mut); }
+  .side { font-size: 8.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); margin: 6px 0 2px; }
+  .cols { column-count: 2; column-gap: 16px; column-rule: 1px solid var(--rule); }
+  section { break-inside: avoid; margin: 0 0 6px; }
+  h2 { font-size: 9.6pt; color: var(--head); margin: 0 0 1px; border-bottom: 1px solid var(--rule); }
+  p { margin: 1px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border-bottom: 1px solid #e3e3e3; padding: 1px 3px; }
+  .katex { font-size: 1.03em; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>6.3700 Quiz 2 <small>— short sheet: copy Side 1 and Side 2 onto one A4 sheet</small></h1>
+
+<div class="side">Side 1 — L1–L11</div>
+<div class="cols">
+<section>
+<h2>Basics</h2>
+<p>$P(A\mid B)=\frac{P(A\cap B)}{P(B)}$, $\;P(B)=\sum_i P(A_i)P(B\mid A_i)$</p>
+<p>Bayes: $P(A_i\mid B)=\frac{P(A_i)P(B\mid A_i)}{P(B)}$</p>
+<p>$\frac{n!}{(n-k)!}$, $\binom nk$, $\frac{n!}{n_1!\cdots n_r!}$</p>
+<p>$\operatorname{Var}X=E[X^2]-(EX)^2$, $\operatorname{Var}(aX+b)=a^2\operatorname{Var}X$</p>
+<p>indep: $E[XY]=EX\,EY$, $\operatorname{Var}(X+Y)=\operatorname{Var}X+\operatorname{Var}Y$</p>
+</section>
+
+<section>
+<h2>Distributions (mean, var)</h2>
+<table>
+<tr><td>Bern$(p)$</td><td>$p,\;p(1-p)$</td><td>Bin$(n,p)$</td><td>$np,\;np(1-p)$</td></tr>
+<tr><td>Geom$(p)$</td><td>$\frac1p,\;\frac{1-p}{p^2}$</td><td>Pois$(\lambda)$</td><td>$\lambda,\;\lambda$</td></tr>
+<tr><td>U$[a,b]$</td><td>$\frac{a+b}2,\;\frac{(b-a)^2}{12}$</td><td>Exp$(\lambda)$</td><td>$\frac1\lambda,\;\frac1{\lambda^2}$</td></tr>
+</table>
+<p>Exp: $f=\lambda e^{-\lambda x}$, $P(X&gt;t)=e^{-\lambda t}$ (memoryless)</p>
+<p>Normal: $P(X\le x)=\Phi\!\left(\frac{x-\mu}\sigma\right)$, $\Phi(-z)=1-\Phi(z)$</p>
+</section>
+
+<section>
+<h2>Joint / conditional</h2>
+<p>$f_X(x)=\int f_{X,Y}(x,y)\,dy$, $\;f_{X\mid Y}=\frac{f_{X,Y}}{f_Y}$</p>
+<p>$f_{X\mid A}(x)=\frac{f_X(x)}{P(A)}$ on $A$, $\;E[X\mid A]=\int x f_{X\mid A}$</p>
+<p>Bayes (any mix): posterior $\propto$ prior $\times$ likelihood, then normalize</p>
+<p>$f_{X\mid Y}(x\mid y)=\frac{f_X(x)\,f_{Y\mid X}(y\mid x)}{f_Y(y)}$</p>
+</section>
+
+<section>
+<h2>Derived distributions</h2>
+<p>$F_Y(y)=P(g(X)\le y)$, then $f_Y=F_Y'$</p>
+<p>$Y=aX+b$: $f_Y(y)=\frac1{|a|}f_X\!\left(\frac{y-b}a\right)$</p>
+<p>max: $F^n$; $\;$ min: $1-(1-F)^n$</p>
+<p>$Z=X+Y$ indep: $f_Z(z)=\int f_X(x)f_Y(z-x)\,dx$</p>
+</section>
+</div>
+
+<div class="side">Side 2 — L12–L13</div>
+<div class="cols">
+<section>
+<h2>Covariance</h2>
+<p>$\operatorname{cov}(X,Y)=E[XY]-EX\,EY$</p>
+<p>$\operatorname{cov}(aX+b,cY+d)=ac\operatorname{cov}(X,Y)$, bilinear</p>
+<p>$\operatorname{Var}(X+Y)=\operatorname{Var}X+\operatorname{Var}Y+2\operatorname{cov}(X,Y)$</p>
+<p>$\operatorname{Var}\sum X_i=\sum\operatorname{Var}X_i+\sum_{i\ne j}\operatorname{cov}(X_i,X_j)$</p>
+<p>$\rho=\frac{\operatorname{cov}(X,Y)}{\sigma_X\sigma_Y}\in[-1,1]$; $|\rho|=1$ iff linear</p>
+<p>indep $\Rightarrow$ cov $=0$ (not conversely: $X\sim U[-1,1]$, $Y=X^2$)</p>
+<p>$\operatorname{cov}(I_A,I_B)=P(A\cap B)-P(A)P(B)$</p>
+<p>indep: $\operatorname{Var}(XY)=E[X^2]E[Y^2]-(EX\,EY)^2$</p>
+</section>
+
+<section>
+<h2>Conditional expectation</h2>
+<p>$E[X\mid Y]$ is a r.v. (a function of $Y$)</p>
+<p>$E\big[E[X\mid Y]\big]=E[X]$</p>
+<p>$\operatorname{Var}X=E[\operatorname{Var}(X\mid Y)]+\operatorname{Var}(E[X\mid Y])$</p>
+<p>Random sum $Y=\sum_{i=1}^N X_i$:</p>
+<p>$\quad E Y=EN\,EX$, $\;\operatorname{Var}Y=EN\operatorname{Var}X+(EX)^2\operatorname{Var}N$</p>
+<p>Random-bias coin, $Q\sim U[0,1]$: $\operatorname{Var}X=\frac n6+\frac{n^2}{12}$</p>
+</section>
+</div>
+</body>
+</html>

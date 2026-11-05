@@ -197,7 +197,7 @@
   courseSel.value = COURSE.code;
   courseSel.onchange = () => switchCourse(courseSel.value);
   $('[data-nav="course"]').textContent = COURSE.code;
-  $('[data-nav="drills"]').hidden = !(window.Drills6191 && COURSE.code === "6.191");
+  $('[data-nav="drills"]').hidden = !({ "6.191": window.Drills6191, "6.3700": window.Drills6370 })[COURSE.code];
 
   $("#randomBtn").addEventListener("click", () => {
     location.hash = `#/problem/${randomProblem(filtered()).id}`;
@@ -838,6 +838,7 @@
             <div class="row-btns">
               ${Object.entries(COURSE.exams).map(([id, e]) => `<a class="btn ghost" href="#/exam/${id}">${esc(e.name)}</a>`).join("")}
               ${hasDrills() ? `<a class="btn accent" href="#/drills">Generated drills</a>` : ""}
+              ${COURSE.code === "6.3700" ? `<a class="btn ghost" href="formula-sheet-6.3700.html" target="_blank" rel="noopener">Quiz 2 formula sheet</a>` : ""}
             </div>
           </div>
         </section>
@@ -1119,8 +1120,9 @@
 
   // ---------------------------------------------------------------- generated drills (6.191)
   // js/drills-6191.js makes a new problem for each (type, seed); answers come from simulators.
-  const DR = window.Drills6191;
-  const hasDrills = () => !!DR && COURSE.code === "6.191";
+  // Each course has its own drill set; switching the course reloads the page.
+  const DR = { "6.191": window.Drills6191, "6.3700": window.Drills6370 }[COURSE.code];
+  const hasDrills = () => !!DR;
   const drillRec = (type) => {
     store.drills = store.drills || {};
     const r = (store.drills[type] = store.drills[type] || { tries: 0, solved: 0, time: 0, seen: [] });
@@ -1212,9 +1214,9 @@
         <div class="drill-stat">${s.tries ? `${s.solved} of ${s.tries} fully correct${s.time ? ` · ${fmtDur(s.time / Math.max(1, s.solved))} per solve` : ""}` : "Not tried yet"}</div></a>`;
     }).join("");
     $("#app").innerHTML = `<div class="drills">
-      <section class="card"><h2>Drills</h2><p class="muted">Each drill makes a new problem every time from a random seed. The answers come from a pipeline simulator
+      <section class="card"><h2>Drills</h2><p class="muted">${DR.intro ? esc(DR.intro) : `Each drill makes a new problem every time from a random seed. The answers come from a pipeline simulator
         (checked against 9 official 6.191 pipeline diagrams) and a cache simulator (checked against Fall 2025 Quiz 2 Problem 4).
-        The link of a drill keeps its seed, so you can come back to the same problem.</p></section>
+        The link of a drill keeps its seed, so you can come back to the same problem.`}</p></section>
       <div class="drill-grid">${cards}</div></div>`;
   }
 
@@ -1273,7 +1275,9 @@
           <span class="spacer"></span>
         </div>
         <div id="verdict"></div>
-        <div class="syntax-help">Numbers may be decimal, hex (<code>0x1C</code>), or fractions (<code>11/9</code>). Text answers ignore case. Write ? for a don't-care.</div>
+        <div class="syntax-help">${COURSE.code === "6.3700"
+          ? "Write exact values or expressions: <code>7/48</code>, <code>exp(-2)</code>, <code>ln(2)</code>, <code>sqrt(3)/2</code>. Decimals within 0.05% are accepted. Yes/no and true/false answers ignore case."
+          : "Numbers may be decimal, hex (<code>0x1C</code>), or fractions (<code>11/9</code>). Text answers ignore case. Write ? for a don't-care."}</div>
       </section>
       <section class="card" id="dSolBox" hidden><h3>Solution</h3><div class="solution">${paras(p.solution)}</div></section>
     </div>`;

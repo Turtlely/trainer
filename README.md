@@ -36,6 +36,14 @@ A course selector in the top bar switches between 6.3700 (probability) and 6.191
   simulator (checked against 9 official pipeline diagrams by `scripts/check-sim.js`) and a cache
   simulator (checked against Fall 2025 Quiz 2 Problem 4 by `scripts/check-drills.js`).
   The generators are in `js/drills-6191.js`.
+- 6.3700 generated drills for Quiz 2 (L8-L13), in the Drills tab when the course is 6.3700: linear
+  combinations, joint PMF tables, the law of total variance, random sums, random parameters,
+  indicator variances, joint PDFs, conditioning on an event, derived distributions, convolution,
+  continuous and mixed Bayes, and true/false checks. The generators are in `js/drills-6370.js`
+  and compute answers with exact fractions. `scripts/check-drills-6370.js` checks them by Monte
+  Carlo simulation (901 answers) and by numeric integration.
+- A short Quiz 2 formula sheet for 6.3700 (`formula-sheet-6.3700.html`, A4), linked from the
+  6.3700 course page.
 - Timed practice exams (6.3700: Quiz 1, Quiz 2, Final; 6.191: Quiz 2) drawn at random across the
   lectures in scope. 6.191 also has the three past Quiz 2 exams as fixed 2-hour exams.
 - Problem list with search, difficulty / status / topic filters, sorting, and stars.
@@ -101,8 +109,8 @@ bad escapes.
 ## Deploy to GitHub Pages
 
 The workflow `.github/workflows/pages.yml` deploys the site on every push to `main`.
-It runs `scripts/check.js`, `scripts/check-sim.js`, and `scripts/check-drills.js` first, so a
-broken problem bank, simulator, or drill stops the deploy.
+It runs `scripts/check.js`, `scripts/check-sim.js`, `scripts/check-drills.js`, and
+`scripts/check-drills-6370.js` first, so a broken problem bank, simulator, or drill stops the deploy.
 
 1. Create a repository on GitHub and push `main` to it.
 2. In the repository, go to **Settings > Pages**.
