@@ -197,7 +197,7 @@
   courseSel.value = COURSE.code;
   courseSel.onchange = () => switchCourse(courseSel.value);
   $('[data-nav="course"]').textContent = COURSE.code;
-  $('[data-nav="drills"]').hidden = !({ "6.191": window.Drills6191, "6.3700": window.Drills6370 })[COURSE.code];
+  $('[data-nav="drills"]').hidden = !({ "6.191": window.Drills6191, "6.3700": window.Drills6370, "6.3000": window.Drills6300 })[COURSE.code];
 
   $("#randomBtn").addEventListener("click", () => {
     location.hash = `#/problem/${randomProblem(filtered()).id}`;
@@ -838,7 +838,7 @@
             <div class="row-btns">
               ${Object.entries(COURSE.exams).map(([id, e]) => `<a class="btn ghost" href="#/exam/${id}">${esc(e.name)}</a>`).join("")}
               ${hasDrills() ? `<a class="btn accent" href="#/drills">Generated drills</a>` : ""}
-              ${COURSE.code === "6.3700" ? `<a class="btn ghost" href="formula-sheet-6.3700.html" target="_blank" rel="noopener">Quiz 2 formula sheet</a>` : ""}
+              ${["6.3700", "6.3000"].includes(COURSE.code) ? `<a class="btn ghost" href="formula-sheet-${COURSE.code}.html" target="_blank" rel="noopener">Quiz 2 formula sheet</a>` : ""}
             </div>
           </div>
         </section>
@@ -1121,7 +1121,7 @@
   // ---------------------------------------------------------------- generated drills (6.191)
   // js/drills-6191.js makes a new problem for each (type, seed); answers come from simulators.
   // Each course has its own drill set; switching the course reloads the page.
-  const DR = { "6.191": window.Drills6191, "6.3700": window.Drills6370 }[COURSE.code];
+  const DR = { "6.191": window.Drills6191, "6.3700": window.Drills6370, "6.3000": window.Drills6300 }[COURSE.code];
   const hasDrills = () => !!DR;
   const drillRec = (type) => {
     store.drills = store.drills || {};
@@ -1144,6 +1144,11 @@
   function gradePart(q, s) {
     if (q.dontCare) return DONT_CARE.has(normTxt(s)) ? "correct" : "wrong";
     if (q.code) return q.accept.some((a) => DR.codeCanon(s) === DR.codeCanon(a)) ? "correct" : "wrong";
+    if (q.anyOf) { // several numeric answers are correct (for example an angle of π or -π)
+      let v; try { v = Expr.evaluate(s); } catch { return "unreadable"; }
+      const rs = q.anyOf.map((a) => Expr.compare(v, Expr.evaluate(a), q.tol));
+      return rs.includes("correct") ? "correct" : rs.includes("close") ? "close" : "wrong";
+    }
     if (q.accept) {
       const c = q.canon ? DR.canon : (x) => x;
       return q.accept.some((a) => (q.canon ? c(s) === c(a) : sameTxt(s, a))) ? "correct" : "wrong";
@@ -1275,7 +1280,9 @@
           <span class="spacer"></span>
         </div>
         <div id="verdict"></div>
-        <div class="syntax-help">${COURSE.code === "6.3700"
+        <div class="syntax-help">${COURSE.code === "6.3000"
+          ? "Write numbers or expressions: <code>-1/2</code>, <code>2/pi</code>, <code>sqrt(3)/2</code>, <code>pi/3</code>. Angles are in radians. Grid cells take plot labels (A, M3) or numbers; Yes/No ignores case."
+          : COURSE.code === "6.3700"
           ? "Write exact values or expressions: <code>7/48</code>, <code>exp(-2)</code>, <code>ln(2)</code>, <code>sqrt(3)/2</code>. Decimals within 0.05% are accepted. Yes/no and true/false answers ignore case."
           : "Numbers may be decimal, hex (<code>0x1C</code>), or fractions (<code>11/9</code>). Text answers ignore case. Write ? for a don't-care."}</div>
       </section>

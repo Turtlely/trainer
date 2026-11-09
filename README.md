@@ -42,6 +42,15 @@ A course selector in the top bar switches between 6.3700 (probability) and 6.191
   continuous and mixed Bayes, and true/false checks. The generators are in `js/drills-6370.js`
   and compute answers with exact fractions. `scripts/check-drills-6370.js` checks them by Monte
   Carlo simulation (901 answers) and by numeric integration.
+- A 6.3000 (MIT Signal Processing, Fall 2026) course view for Quiz 2 (L1-L13: Fourier series and
+  transforms, sampling, systems, convolution, frequency response, modulation, DFT, circular
+  convolution). 72 written practice problems (`js/problems-6300.js`, answers recomputed by
+  `scripts/check_6300.py` with numpy/scipy), 16 official problems from the Spring 2022, Fall 2022,
+  Fall 2023, and Spring 2025 Quiz 2 exams (`js/problems-6300-real.js`; formula-defined plots are
+  redrawn, hand-drawn ones link to the official PDF), the past quizzes as timed exams, and 17
+  drill types (`js/drills-6300.js`) including plot-matching drills. `scripts/check-drills-6300.js`
+  checks the drills by numerical integration, direct sums, DFT products, and numeric tests of the
+  system-properties table. A Quiz 2 formula sheet is in `formula-sheet-6.3000.html`.
 - A short Quiz 2 formula sheet for 6.3700 (`formula-sheet-6.3700.html`, A4), linked from the
   6.3700 course page.
 - Timed practice exams (6.3700: Quiz 1, Quiz 2, Final; 6.191: Quiz 2) drawn at random across the

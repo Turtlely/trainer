@@ -18,9 +18,13 @@ require(path.join(root, "problems-6191-4.js"));
 require(path.join(root, "fig.js"));
 for (const f of fs.readdirSync(root).filter((f) => /^real-6191-.*\.js$/.test(f))) require(path.join(root, f));
 require(path.join(root, "problems-6191-real.js"));
+require(path.join(root, "problems-6300.js"));
+require(path.join(root, "drills-6300.js"));
+require(path.join(root, "problems-6300-real.js"));
 globalThis.PROBLEMS.forEach((p) => { if (p.lec !== undefined) presetLec.set(p.id, p.lec); });
 require(path.join(root, "course.js"));
 require(path.join(root, "course-6191.js"));
+require(path.join(root, "course-6300.js"));
 
 const { Expr, PROBLEMS, COURSES, courseOf } = globalThis;
 let errors = 0;

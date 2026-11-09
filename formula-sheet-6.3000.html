@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>6.3000 Quiz 2 Formula Sheet</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+<style>
+  @page { size: letter; margin: 0.4in; }
+  :root { --ink: #111; --mut: #666; --rule: #bbb; --head: #0b5394; }
+  html { background: #fff; }
+  body { margin: 0 auto; max-width: 7.7in; color: var(--ink); font: 9.3pt/1.38 "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 10px; background: #fff; }
+  h1 { font-size: 12pt; margin: 0 0 4px; }
+  h1 small { font-weight: 400; font-size: 8.5pt; color: var(--mut); }
+  .cols { column-count: 2; column-gap: 16px; column-rule: 1px solid var(--rule); }
+  section { break-inside: avoid; margin: 0 0 6px; }
+  h2 { font-size: 9.6pt; color: var(--head); margin: 0 0 1px; border-bottom: 1px solid var(--rule); }
+  p { margin: 1px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #e3e3e3; padding: 1px 3px; text-align: left; }
+  th { color: var(--mut); font-weight: 600; }
+  .katex { font-size: 1.02em; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>6.3000 Quiz 2 <small>— formulas to copy onto your handwritten sheets (6.3000 conventions: $\frac1T$, $\frac1N$ in analysis)</small></h1>
+<div class="cols">
+
+<section>
+<h2>Four Fourier representations</h2>
+<table>
+<tr><th></th><th>analysis</th><th>synthesis</th></tr>
+<tr><td>CTFS</td><td>$a_k=\frac1T\int_T f(t)e^{-jk\omega_0t}dt$</td><td>$f(t)=\sum_k a_ke^{jk\omega_0t}$</td></tr>
+<tr><td>DTFS</td><td>$a_k=\frac1N\sum_{n=\langle N\rangle}f[n]e^{-jk\Omega_0n}$</td><td>$f[n]=\sum_{k=\langle N\rangle}a_ke^{jk\Omega_0n}$</td></tr>
+<tr><td>CTFT</td><td>$X(\omega)=\int x(t)e^{-j\omega t}dt$</td><td>$x(t)=\frac1{2\pi}\int X(\omega)e^{j\omega t}d\omega$</td></tr>
+<tr><td>DTFT</td><td>$X(\Omega)=\sum_n x[n]e^{-j\Omega n}$</td><td>$x[n]=\frac1{2\pi}\int_{2\pi}X(\Omega)e^{j\Omega n}d\Omega$</td></tr>
+<tr><td>DFT</td><td>$X[k]=\frac1N\sum_{n=0}^{N-1}x[n]e^{-j\frac{2\pi kn}N}$</td><td>$x[n]=\sum_{k=0}^{N-1}X[k]e^{j\frac{2\pi kn}N}$</td></tr>
+</table>
+<p>$\omega_0=\frac{2\pi}T$, $\Omega_0=\frac{2\pi}N$. Trig form: $c_0=a_0$, $c_k=2\operatorname{Re}a_k$, $d_k=-2\operatorname{Im}a_k$.</p>
+<p>DFT = $\frac1N\times$ DTFT samples: $X[k]=\frac1NX(2\pi k/N)$. $X[0]$ = average.</p>
+</section>
+
+<section>
+<h2>Properties (FT; same idea for FS, DTFT, DFT)</h2>
+<table>
+<tr><td>shift</td><td>$x(t-t_0)\to e^{-j\omega t_0}X$ ; FS: $a_ke^{-jk\omega_0t_0}$</td></tr>
+<tr><td>modulate</td><td>$e^{j\omega_ct}x\to X(\omega-\omega_c)$ ; DFT: $X[k-k_0]$</td></tr>
+<tr><td>cos mod</td><td>$x\cos\omega_ct\to\frac12X(\omega-\omega_c)+\frac12X(\omega+\omega_c)$</td></tr>
+<tr><td>scale</td><td>$x(at)\to\frac1{|a|}X(\omega/a)$</td></tr>
+<tr><td>flip</td><td>$x(-t)\to X(-\omega)$ ; FS/DFT: $a_{-k}$</td></tr>
+<tr><td>derivative</td><td>$x'\to j\omega X$ ; FS: $jk\omega_0a_k$</td></tr>
+<tr><td>times $t$</td><td>$t\,x(t)\to j\frac{dX}{d\omega}$</td></tr>
+<tr><td>convolve</td><td>$x*h\to XH$ ; $xh\to\frac1{2\pi}X*H$</td></tr>
+<tr><td>DFT product</td><td>$X[k]H[k]\to\frac1N(x\circledast_N h)[n]$</td></tr>
+<tr><td>real $x$</td><td>$X(-\omega)=X^*(\omega)$; even→real, odd→imaginary</td></tr>
+<tr><td>Parseval</td><td>$\frac1T\!\int_T|f|^2=\sum|a_k|^2$; $\int|x|^2=\frac1{2\pi}\!\int|X|^2$; $\frac1N\sum|x|^2=\sum|X[k]|^2$</td></tr>
+</table>
+</section>
+
+<section>
+<h2>Pairs</h2>
+<p>$\delta(t)\leftrightarrow1$, $\;1\leftrightarrow2\pi\delta(\omega)$, $\;e^{j\omega_0t}\leftrightarrow2\pi\delta(\omega-\omega_0)$</p>
+<p>$e^{-at}u(t)\leftrightarrow\frac1{a+j\omega}$, $\;\;a^nu[n]\leftrightarrow\frac1{1-ae^{-j\Omega}}$ ($|a|<1$)</p>
+<p>pulse $|t|&lt;T_1$: $\frac{2\sin\omega T_1}{\omega}$; triangle $1-|t|$: $\left(\frac{\sin\omega/2}{\omega/2}\right)^2$</p>
+<p>ideal LPF $|\omega|&lt;W$: $\frac{\sin Wt}{\pi t}$; DT pulse $0..L-1$: $e^{-j\Omega\frac{L-1}2}\frac{\sin(L\Omega/2)}{\sin(\Omega/2)}$</p>
+<p>periodic $f$: $X(\omega)=\sum_k2\pi a_k\delta(\omega-k\omega_0)$</p>
+<p>square duty $D$ centered: $a_k=\frac{\sin\pi kD}{\pi k}$; $\pm1$ square: $\frac2{j\pi k}$ odd $k$</p>
+</section>
+
+<section>
+<h2>Sums and identities</h2>
+<p>$\sum_{n=0}^{N-1}z^n=\frac{1-z^N}{1-z}$, $\;\sum_{n\ge0}z^n=\frac1{1-z}$</p>
+<p>$\sum_{n=0}^{N-1}e^{-j2\pi mn/N}=N$ if $N\mid m$, else $0$</p>
+<p>$\cos\theta=\frac{e^{j\theta}+e^{-j\theta}}2$, $\sin\theta=\frac{e^{j\theta}-e^{-j\theta}}{2j}$, $\;1-e^{-j2\theta}=2je^{-j\theta}\sin\theta$</p>
+<p>$\cos^2=\frac12+\frac12\cos2\theta$, $\;\cos^3=\frac34\cos\theta+\frac14\cos3\theta$</p>
+</section>
+
+<section>
+<h2>Sampling</h2>
+<p>$x[n]=x(nT_s)$, $\Omega=\omega T_s=2\pi f/f_s$; DT freq only mod $2\pi$</p>
+<p>Nyquist: $f_s>2f_{max}$; $f$ aliases to $|f-mf_s|$ in $[0,f_s/2]$</p>
+<p>$\cos(2\pi pn/q)$ period $q/\gcd(p,q)$</p>
+</section>
+
+<section>
+<h2>Systems</h2>
+<p>additive: $x_1+x_2\to y_1+y_2$; homogeneous: $cx\to cy$ (try $c=-1, 0$); TI: $x[n-n_0]\to y[n-n_0]$</p>
+<p>red flags: constants ($+1$), $x^2$, $|x|$, $\sin x$ (nonlinear); explicit $n$, $x[-n]$, $x[2n]$, $x\cos\omega t$ (time-varying)</p>
+<p>LTI: $y=x*h$; cascade $h_1*h_2$, $H_1H_2$; parallel $h_1+h_2$</p>
+<p>$\sum a_ky[n-k]=\sum b_kx[n-k]\Rightarrow H(\Omega)=\frac{\sum b_ke^{-jk\Omega}}{\sum a_ke^{-jk\Omega}}$</p>
+<p>$y+\tau y'=x\Rightarrow H=\frac1{1+j\omega\tau}$</p>
+</section>
+
+<section>
+<h2>Convolution</h2>
+<p>$(x*h)[n]=\sum_kx[k]h[n-k]$: add shifted copies of $x$ scaled by $h[k]$</p>
+<p>support: starts add, ends add; length $L_1+L_2-1$; sums (areas) multiply</p>
+<p>$u*u=(n+1)u[n]$, $\;u*u*u=\frac{(n+1)(n+2)}2$, $\;a^nu*u=\frac{1-a^{n+1}}{1-a}$</p>
+<p>circular $N$: linear conv, then wrap mod $N$ (no wrap if $N\ge L_1+L_2-1$)</p>
+</section>
+
+<section>
+<h2>Frequency response</h2>
+<p>$e^{j\Omega n}\to H(\Omega)e^{j\Omega n}$; $\cos\Omega_0n\to|H|\cos(\Omega_0n+\angle H)$</p>
+<p>$=\operatorname{Re}H\cos\Omega_0n-\operatorname{Im}H\sin\Omega_0n$</p>
+<p>$H(0)=\sum h$, $H(\pi)=\sum(-1)^nh[n]$; linear angle slope $-d$ = delay $d$; jumps of $\pi$ = sign changes</p>
+</section>
+
+<section>
+<h2>Modulation (AM)</h2>
+<p>$y=x\cos\omega_ct$: copies at $\pm\omega_c$, band $\omega_c\pm W$; need $\omega_c>W$</p>
+<p>demod: $\times\cos\omega_ct$, LPF gain 2, cutoff in $(W,2\omega_c-W)$; phase error $\theta\Rightarrow\times\cos\theta$</p>
+</section>
+
+<section>
+<h2>DFT practice</h2>
+<p>bin $k$ at $f=kf_s/N$; spacing $f_s/N$; window $N/f_s$ s</p>
+<p>real cos on bin $m$: spikes $\frac12$ at $k=m,N-m$; off-bin: leakage</p>
+<p>$(-1)^nx[n]\to X[k-\frac N2]$; zero padding = denser samples, same resolution</p>
+<p>main lobe of length-$N$ window: $\pm\frac{2\pi}N$</p>
+</section>
+
+</div>
+</body>
+</html>
