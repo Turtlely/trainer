@@ -10,9 +10,12 @@ permissions:
   pages: write
   id-token: write
 
+# Never cancel a Pages deployment that has started: a cancelled deployment can stay active on
+# GitHub's side and make the next deployments fail with "Deployment cancelled". A newer push
+# waits in the queue instead.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
