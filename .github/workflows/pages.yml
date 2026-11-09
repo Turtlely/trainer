@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 20
       - name: Check problem bank
-        run: node scripts/check.js && node scripts/check-sim.js && node scripts/check-drills.js && node scripts/check-drills-6370.js && node scripts/check-drills-6300.js
+        run: node scripts/check.js && node scripts/check-sim.js && node scripts/check-drills.js && node scripts/check-drills-6370.js && node scripts/check-drills-6300.js && node scripts/check-real-6300.js
       - name: Stage site files
         run: |
           mkdir _site

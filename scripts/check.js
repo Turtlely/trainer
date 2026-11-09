@@ -62,6 +62,7 @@ for (const p of PROBLEMS) {
   if (p.real) {
     // Official problems: every part answer evaluates, the text is present, and every "@fig name" exists.
     for (const q of p.parts) {
+      if (q.accept) { if (!q.accept.length || !q.answer) fail(`#${p.id} text part "${q.q}" has no answer`); continue; }
       try { Expr.evaluate(q.answer); } catch (e) { fail(`#${p.id} part "${q.q}" answer "${q.answer}": ${e.message}`); }
     }
     if (!p.text || !p.statement.trim() || !p.solution.trim()) fail(`#${p.id} has no transcribed text (${p.img})`);

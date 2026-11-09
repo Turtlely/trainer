@@ -63,7 +63,9 @@
   //                      A first line "{plain}" drops the bold first column.
   //   "- item" lines     a bullet list
   // and **text** is bold. Write \$ for a literal dollar sign.
+  // [text](https://...) is an external link.
   const inlineCode = (s) => esc(s).replace(/\[\[(.+?)\]\](?!\])/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[^\[])\[([^\[\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1<a class="link" href="$3" target="_blank" rel="noopener">$2</a>')
     // "\$" is a literal dollar sign: alone in its own text node, KaTeX does not pair it.
     .replace(/\\\$/g, "<span>$$</span>");
   function table(p) {
@@ -474,6 +476,9 @@
   document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
 
   const partDone = (r, i) => r.submissions.some((s) => s.part === i && s.result === "correct");
+  // Text parts of official problems (plot letters, Yes/No, "f0*f2"): case, spaces, and
+  // separators are ignored, and the order of the tokens does not matter.
+  const partToks = (s) => (String(s).toLowerCase().match(/[a-z]*\d+|[a-z]+/g) || []).sort().join(",");
 
   function realAnswerBox(p) {
     const r = rec(p.id);
@@ -481,7 +486,7 @@
       <div class="part-row ${partDone(r, i) ? "ok" : ""}" data-part="${i}">
         <label for="part${i}">${inlineCode(q.q)}</label>
         <input id="part${i}" class="answer-input part-input" autocomplete="off" spellcheck="false"
-          placeholder="${partDone(r, i) ? "Correct ✓" : q.tol === 0 ? "exact" : "number or fraction"}" />
+          placeholder="${partDone(r, i) ? "Correct ✓" : q.accept ? q.hint || "text" : q.tol === 0 ? "exact" : "number or fraction"}" />
         <span class="part-mark">${partDone(r, i) ? "✓" : ""}</span>
       </div>`).join("");
     return `<div class="answer-box">
@@ -511,9 +516,12 @@
         const inp = $(`#part${i}`);
         const s = inp.value.trim();
         if (!s) return;
-        let v;
-        try { v = Expr.evaluate(s); } catch (err) { bad = `${q.q}: ${err.message}`; return; }
-        const result = Expr.compare(v, Expr.evaluate(q.answer), q.tol);
+        let v, result;
+        if (q.accept) { v = s; result = q.accept.some((a) => partToks(a) === partToks(s)) ? "correct" : "wrong"; }
+        else {
+          try { v = Expr.evaluate(s); } catch (err) { bad = `${q.q}: ${err.message}`; return; }
+          result = Expr.compare(v, Expr.evaluate(q.answer), q.tol);
+        }
         r.submissions.unshift({ t: Date.now(), input: `${q.q.replace(/\$/g, "")} = ${s}`, value: v, result, part: i });
         graded++;
         if (result === "correct") { right++; inp.value = ""; }

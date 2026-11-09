@@ -45,12 +45,25 @@ A course selector in the top bar switches between 6.3700 (probability) and 6.191
 - A 6.3000 (MIT Signal Processing, Fall 2026) course view for Quiz 2 (L1-L13: Fourier series and
   transforms, sampling, systems, convolution, frequency response, modulation, DFT, circular
   convolution). 72 written practice problems (`js/problems-6300.js`, answers recomputed by
-  `scripts/check_6300.py` with numpy/scipy), 16 official problems from the Spring 2022, Fall 2022,
-  Fall 2023, and Spring 2025 Quiz 2 exams (`js/problems-6300-real.js`; formula-defined plots are
-  redrawn, hand-drawn ones link to the official PDF), the past quizzes as timed exams, and 17
-  drill types (`js/drills-6300.js`) including plot-matching drills. `scripts/check-drills-6300.js`
-  checks the drills by numerical integration, direct sums, DFT products, and numeric tests of the
-  system-properties table. A Quiz 2 formula sheet is in `formula-sheet-6.3000.html`.
+  `scripts/check_6300.py` with numpy/scipy), 17 official problems from the Spring 2022, Fall 2022,
+  Fall 2023, and Spring 2025 Quiz 2 exams (`js/problems-6300-real.js`). Every plot and block
+  diagram of these problems is redrawn as SVG from the signal it shows, with the original panel
+  letters, and matching answers (plot letters, Yes/No, "f0*f2") have their own answer boxes.
+  `scripts/check-real-6300.js` recomputes each matching answer from the signals (numerical
+  Fourier integrals, direct DFT sums, convolutions) and checks it against the official key. The
+  past quizzes are also timed exams. There are 31
+  drill types (`js/drills-6300.js`) including plot-matching drills. Eight drills are about systems:
+  property tables, system types (linear, time-invariant, causal, memoryless, stable; 42 systems),
+  "could it be LTI" input-output pairs, system identification, difference equations, block
+  diagrams (cascade, parallel, feedback, echo inverses, step responses), CT systems, and sinusoids
+  through FIR filters. Five are about communication systems: AM spectra, demodulation errors
+  (phase error, frequency error, sine carrier), frequency-division multiplexing, AM with carrier
+  (envelope detection, impulse areas, power), and matching modulated spectra to plots. Seven are
+  about the DFT, including DFT properties (shifts, flips, modulation, zero padding, repetition,
+  inserted zeros), windows and resolution, and the inverse DFT.
+  `scripts/check-drills-6300.js` checks the drills by numerical integration, direct sums, DFT
+  products, ODE simulation, time-domain simulation of modulators, numerical Fourier transforms,
+  and numeric tests of all six properties of every system in the table. A Quiz 2 formula sheet is in `formula-sheet-6.3000.html`.
 - A short Quiz 2 formula sheet for 6.3700 (`formula-sheet-6.3700.html`, A4), linked from the
   6.3700 course page.
 - Timed practice exams (6.3700: Quiz 1, Quiz 2, Final; 6.191: Quiz 2) drawn at random across the
@@ -95,7 +108,9 @@ Problems live in `js/problems-*.js`. Each entry has an `id`, `title`, `diff`, `t
 lecture map for 6.3700 problems without `lec`. `js/course-6191.js` holds the 6.191 structure.
 An official problem (`js/problems-6191-real.js`) has `real` (`quiz` or `worksheet`), `source`,
 `img` (the key of its text in `js/real-6191-quiz.js` or `js/real-6191-ws.js`), and `parts` (a
-list of `{ q, answer }`) in place of `answer`. Parts without a number are self-checked.
+list of `{ q, answer }`) in place of `answer`. A part with `accept` (a list of strings) is a text
+part: case, spaces, and separators are ignored, and the order of the tokens does not matter.
+Parts without a number are self-checked. Problem text can link out with `[text](https://...)`.
 Figures are SVG built with the helpers in `js/fig.js` (boxes, wires, muxes, dataflow graphs with
 register dots, state machines, pipeline diagrams, and two RISC-V datapath drawings). To see every
 figure at full size, serve the folder and open `scripts/figs.html` (add `?f=name` to filter).
@@ -119,7 +134,7 @@ bad escapes.
 
 The workflow `.github/workflows/pages.yml` deploys the site on every push to `main`.
 It runs `scripts/check.js`, `scripts/check-sim.js`, `scripts/check-drills.js`, and
-`scripts/check-drills-6370.js` first, so a broken problem bank, simulator, or drill stops the deploy.
+`scripts/check-drills-6370.js`, `scripts/check-drills-6300.js`, and `scripts/check-real-6300.js` first, so a broken problem bank, simulator, or drill stops the deploy.
 
 1. Create a repository on GitHub and push `main` to it.
 2. In the repository, go to **Settings > Pages**.

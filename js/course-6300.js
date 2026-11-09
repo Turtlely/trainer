@@ -42,7 +42,7 @@
       sp25: { name: "Spring 2025 Quiz 2", ids: [3501, 3502, 3503, 3504], minutes: 110 },
       fa23: { name: "Fall 2023 Quiz 2", ids: [3511, 3512, 3513, 3514], minutes: 110 },
       fa22: { name: "Fall 2022 Quiz 2", ids: [3521, 3522, 3523, 3524], minutes: 110 },
-      sp22: { name: "Spring 2022 Quiz 2", ids: [3531, 3532, 3533, 3534], minutes: 110 },
+      sp22: { name: "Spring 2022 Quiz 2", ids: [3531, 3535, 3532, 3533, 3534], minutes: 110 },
     },
   });
 })(typeof window !== "undefined" ? window : globalThis);
